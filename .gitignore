@@ -7,3 +7,4 @@ build/
 dist/
 *.egg-info/
 qwen-commit.toml
+history-scan.json
