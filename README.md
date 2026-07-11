@@ -6,13 +6,15 @@ The pipeline collects a user's local Git history, trains SFT and DPO adapters an
 
 ## History scan
 
-The scan reports repositories, shallow clones, and the
-number of commits matching your configured or Git-configured email identities; it does not store
-commit messages or diffs.
+The scan reports repositories, shallow clones, total commits, and distinct author-email counts; it
+does not store commit messages, diffs, or author identities.
 
 ```console
 uv run qwen-commit history scan
 ```
+
+It writes `history-scan.json` in the current directory. Use `--json NAME` to choose a
+different report path.
 
 ## Output contract
 
