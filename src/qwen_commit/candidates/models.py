@@ -4,9 +4,22 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 
 from qwen_commit.history.models import HistoryScanReport
+
+
+class CandidateRejectionReason(StrEnum):
+    """Reason an inspected commit was excluded from the candidate dataset."""
+
+    MERGE = "merge"
+    EMPTY_SUBJECT = "empty_subject"
+    BOT = "bot"
+    FIXUP = "fixup"
+    EMPTY_CHANGE = "empty_change"
+    BINARY = "binary"
+    GENERATED_ONLY = "generated_only"
 
 
 @dataclass(frozen=True)
@@ -42,7 +55,7 @@ class CandidateBuildReport:
     candidates_path: Path
     provenance_path: Path
     accepted_count: int
-    rejection_counts: Counter[str] = field(default_factory=Counter)
+    rejection_counts: Counter[CandidateRejectionReason] = field(default_factory=Counter)
 
     @property
     def rejected_count(self) -> int:
