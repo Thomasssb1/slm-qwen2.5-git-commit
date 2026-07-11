@@ -54,8 +54,7 @@ class HistoryScanReport:
     @property
     def included_repository_count(self) -> int:
         return sum(
-            repository.status is RepositoryScanStatus.INCLUDED
-            for repository in self.repositories
+            repository.status is RepositoryScanStatus.INCLUDED for repository in self.repositories
         )
 
     @property
