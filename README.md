@@ -4,6 +4,18 @@
 
 The pipeline collects a user's local Git history, trains SFT and DPO adapters and serves it locally for a fill-then-review Git hook.
 
+## History scan
+
+The scan reports repositories, shallow clones, total commits, and distinct author-email counts; it
+does not store commit messages, diffs, or author identities.
+
+```console
+uv run qwen-commit history scan
+```
+
+It writes `history-scan.json` in the current directory. Use `--json NAME` to choose a
+different report path.
+
 ## Output contract
 
 The model must return exactly one Git commit subject:

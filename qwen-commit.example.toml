@@ -1,0 +1,7 @@
+[history]
+# Add one or more directories that contain local Git repositories.
+roots = ["C:/path/to/your/repositories"]
+
+# Optional repository-path and remote-slug exclusions.
+ignore_repositories = ["archive/*"]
+ignore_remotes = ["github.com/example/ignored-repository"]

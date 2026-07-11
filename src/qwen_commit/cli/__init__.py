@@ -1,10 +1,11 @@
-"""The foundation command-line interface."""
+"""Root command-line application."""
 
 from typing import Annotated
 
 import typer
 
 from qwen_commit import __version__
+from qwen_commit.cli.history import history_app
 
 app = typer.Typer(
     name="qwen-commit",
@@ -13,6 +14,7 @@ app = typer.Typer(
     no_args_is_help=False,
     pretty_exceptions_show_locals=False,
 )
+app.add_typer(history_app, name="history")
 
 
 def _show_version(value: bool) -> None:
@@ -34,6 +36,6 @@ def main(
         ),
     ] = False,
 ) -> None:
-    """Show the foundation CLI help until commands are added in later chunks."""
+    """Show root help until a command group is selected."""
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
