@@ -2,9 +2,6 @@
 # Add one or more directories that contain local Git repositories.
 roots = ["C:/path/to/your/repositories"]
 
-# Optional additional identities used to match authored commits exactly.
-author_emails = ["you@example.com"]
-
 # Optional repository-path and remote-slug exclusions.
 ignore_repositories = ["archive/*"]
 ignore_remotes = ["github.com/example/ignored-repository"]

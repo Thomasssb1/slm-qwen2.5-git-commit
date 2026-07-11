@@ -7,7 +7,6 @@ from pathlib import Path
 
 from qwen_commit.history.errors import HistoryScanError
 from qwen_commit.history.models import HistoryConfig
-from qwen_commit.history.utils import normalise_emails
 
 
 def load_history_config(path: Path) -> HistoryConfig:
@@ -36,9 +35,6 @@ def load_history_config(path: Path) -> HistoryConfig:
 
     return HistoryConfig(
         roots=roots,
-        author_emails=normalise_emails(
-            _optional_string_list(history, "author_emails", "history.author_emails")
-        ),
         ignore_repositories=_optional_string_list(
             history, "ignore_repositories", "history.ignore_repositories"
         ),
