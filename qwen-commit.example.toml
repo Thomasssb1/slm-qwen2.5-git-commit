@@ -5,3 +5,7 @@ roots = ["C:/path/to/your/repositories"]
 # Optional repository-path and remote-slug exclusions.
 ignore_repositories = ["archive/*"]
 ignore_remotes = ["github.com/example/ignored-repository"]
+
+[candidates]
+# Optional author names treated as automated commit identities.
+bot_names = ["claude", "codex", "copilot", "dependabot", "github-actions"]

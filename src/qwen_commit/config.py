@@ -8,14 +8,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from qwen_commit.candidates.config import CandidateConfig
     from qwen_commit.history.models import HistoryConfig
-
-
-@dataclass(frozen=True)
-class CandidateConfig:
-    """Configuration for candidate extraction."""
-
-    bot_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -28,50 +22,30 @@ class Config:
 
 def load_config(path: Path) -> Config:
     """Load and validate the complete TOML configuration."""
+    from qwen_commit.candidates.config import parse_candidate_config
+    from qwen_commit.history.config import parse_history_config
     from qwen_commit.history.errors import HistoryScanError
-    from qwen_commit.history.models import HistoryConfig
 
     document = _load_document(path, HistoryScanError)
     history = document.get("history")
     if not isinstance(history, dict):
         raise HistoryScanError("The configuration file must define a [history] table.")
 
-    candidates = document.get("candidates", {})
-    if not isinstance(candidates, dict):
+    candidates_section = document.get("candidates", {})
+    if not isinstance(candidates_section, dict):
         raise HistoryScanError("The [candidates] configuration section must be a table.")
 
-    roots = tuple(
-        dict.fromkeys(
-            _resolve_config_path(value, path.parent)
-            for value in _required_string_list(history, "roots", "history.roots", HistoryScanError)
-        )
-    )
-    if not roots:
-        raise HistoryScanError("history.roots must contain at least one path.")
-
     return Config(
-        history=HistoryConfig(
-            roots=roots,
-            ignore_repositories=_optional_string_list(
-                history, "ignore_repositories", "history.ignore_repositories", HistoryScanError
-            ),
-            ignore_remotes=_optional_string_list(
-                history, "ignore_remotes", "history.ignore_remotes", HistoryScanError
-            ),
-        ),
-        candidates=CandidateConfig(
-            bot_names=_optional_string_list(
-                candidates, "bot_names", "candidates.bot_names", HistoryScanError
-            )
-        ),
+        history=parse_history_config(history, path.parent, HistoryScanError),
+        candidates=parse_candidate_config(candidates_section, HistoryScanError),
     )
 
 
 def _load_document(path: Path, error_type: type[Exception]) -> dict[str, object]:
     if not path.exists():
-        raise error_type(f"History configuration file does not exist: {path}")
+        raise error_type(f"Configuration file does not exist: {path}")
     if not path.is_file():
-        raise error_type(f"History configuration is not a file: {path}")
+        raise error_type(f"Configuration is not a file: {path}")
 
     try:
         with path.open("rb") as config_file:
@@ -81,18 +55,20 @@ def _load_document(path: Path, error_type: type[Exception]) -> dict[str, object]
     return document
 
 
-def _required_string_list(
+def required_string_list(
     section: dict[str, object], key: str, setting_name: str, error_type: type[Exception]
 ) -> tuple[str, ...]:
-    values = _optional_string_list(section, key, setting_name, error_type)
+    """Read a required array of non-blank strings from a TOML section."""
+    values = optional_string_list(section, key, setting_name, error_type)
     if not values:
         raise error_type(f"{setting_name} is required.")
     return values
 
 
-def _optional_string_list(
+def optional_string_list(
     section: dict[str, object], key: str, setting_name: str, error_type: type[Exception]
 ) -> tuple[str, ...]:
+    """Read an optional array of non-blank strings from a TOML section."""
     if key not in section:
         return ()
     value = section[key]
@@ -103,7 +79,8 @@ def _optional_string_list(
     return tuple(value)
 
 
-def _resolve_config_path(value: str, config_directory: Path) -> Path:
+def resolve_config_path(value: str, config_directory: Path) -> Path:
+    """Resolve a path value relative to the configuration file directory."""
     candidate = Path(value).expanduser()
     if not candidate.is_absolute():
         candidate = config_directory / candidate
