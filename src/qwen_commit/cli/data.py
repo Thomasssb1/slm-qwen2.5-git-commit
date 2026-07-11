@@ -1,5 +1,6 @@
 """Private dataset-building commands."""
 
+import logging
 from pathlib import Path
 from typing import Annotated
 
@@ -24,6 +25,7 @@ def build_candidate_data(
     ] = Path("provenance.parquet"),
 ) -> None:
     """Extract filtered historical commits into private Parquet files."""
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     try:
         config = load_config(Path("qwen-commit.toml"))
         report = build_candidates(

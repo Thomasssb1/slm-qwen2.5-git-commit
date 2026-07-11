@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from collections import Counter
 from pathlib import Path
@@ -22,8 +23,14 @@ from qwen_commit.candidates.models import (
 )
 from qwen_commit.candidates.storage import write_parquet
 from qwen_commit.candidates.utils import as_utc, opaque_id
-from qwen_commit.history import HistoryScanError, HistoryScanReport, RepositoryScanStatus
+from qwen_commit.history import (
+    HistoryScanError,
+    HistoryScanReport,
+    RepositoryScanStatus,
+)
 from qwen_commit.history.utils import git_raw_text, git_text
+
+logger = logging.getLogger(__name__)
 
 
 def build_candidates(
@@ -36,6 +43,13 @@ def build_candidates(
     candidates: list[Candidate] = []
     provenance: list[Provenance] = []
     rejection_counts: Counter[CandidateRejectionReason] = Counter()
+    inspected_count = 0
+
+    logger.info(
+        "Building candidates from %d commits across %d repositories",
+        scan_report.commit_count,
+        scan_report.included_repository_count,
+    )
 
     for repository in scan_report.repositories:
         if repository.status is not RepositoryScanStatus.INCLUDED:
@@ -44,9 +58,11 @@ def build_candidates(
             raise CandidateBuildError(
                 f"{repository.path}: shallow repository history cannot build candidates."
             )
+        logger.info("Scanning repository: %s", repository.path)
         repository_group_id = opaque_id("repository", str(repository.path))
         remote_urls = _remote_urls(repository.path)
         for commit_sha in _commit_shas(repository.path):
+            inspected_count += 1
             metadata = _commit_metadata(repository.path, commit_sha)
             candidate, rejected_as = _extract_candidate(
                 repository.path,
@@ -57,27 +73,42 @@ def build_candidates(
             )
             if rejected_as:
                 rejection_counts[rejected_as] += 1
-                continue
-            if candidate is None:
-                raise CandidateBuildError(
-                    f"{repository.path}: candidate extraction produced no result."
+            else:
+                if candidate is None:
+                    raise CandidateBuildError(
+                        f"{repository.path}: candidate extraction produced no result."
+                    )
+                candidates.append(candidate)
+                provenance.append(
+                    Provenance(
+                        example_id=candidate.example_id,
+                        repository_group_id=repository_group_id,
+                        repository_path=str(repository.path),
+                        remote_urls=remote_urls,
+                        commit_sha=commit_sha,
+                        author_name=metadata[2],
+                        author_email=metadata[3],
+                    )
                 )
-            candidates.append(candidate)
-            provenance.append(
-                Provenance(
-                    example_id=candidate.example_id,
-                    repository_group_id=repository_group_id,
-                    repository_path=str(repository.path),
-                    remote_urls=remote_urls,
-                    commit_sha=commit_sha,
-                    author_name=metadata[2],
-                    author_email=metadata[3],
+            if inspected_count % 100 == 0:
+                logger.info(
+                    "Processed %d/%d commits (%d accepted, %d rejected)",
+                    inspected_count,
+                    scan_report.commit_count,
+                    len(candidates),
+                    sum(rejection_counts.values()),
                 )
-            )
+
+        logger.info("Finished scanning repository: %s", repository.path)
 
     candidates.sort(key=lambda candidate: candidate.example_id)
     provenance.sort(key=lambda entry: entry.example_id)
     write_parquet(candidates, provenance, candidates_path, provenance_path)
+    logger.info(
+        "Candidate build complete: %d accepted, %d rejected",
+        len(candidates),
+        sum(rejection_counts.values()),
+    )
     return CandidateBuildReport(
         scan_report=scan_report,
         candidates_path=candidates_path,
