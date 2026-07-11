@@ -33,21 +33,24 @@ def scan_history(config: HistoryConfig) -> HistoryScanReport:
 
         if matches_any(path_candidates, config.ignore_repositories):
             scans.append(
-                RepositoryScan(repository, RepositoryScanStatus.IGNORED_PATH, None, None, False)
+                RepositoryScan(repository, RepositoryScanStatus.IGNORED_PATH, 0, frozenset(), False)
             )
             continue
         if matches_any(remote_slugs, config.ignore_remotes):
             scans.append(
-                RepositoryScan(repository, RepositoryScanStatus.IGNORED_REMOTE, None, None, False)
+                RepositoryScan(
+                    repository, RepositoryScanStatus.IGNORED_REMOTE, 0, frozenset(), False
+                )
             )
             continue
 
+        repository_author_emails = _unique_author_emails(repository)
         scans.append(
             RepositoryScan(
                 path=repository,
                 status=RepositoryScanStatus.INCLUDED,
                 commit_count=_commit_count(repository),
-                author_email_count=len(_unique_author_emails(repository)),
+                author_emails=repository_author_emails,
                 shallow=_is_shallow_repository(repository),
             )
         )
@@ -110,12 +113,12 @@ def _commit_count(repository: Path) -> int:
     return int(output) if output else 0
 
 
-def _unique_author_emails(repository: Path) -> set[str]:
-    return {
+def _unique_author_emails(repository: Path) -> frozenset[str]:
+    return frozenset(
         email.strip().casefold()
         for email in git_output(repository, "log", "--all", "--format=%ae").splitlines()
         if email.strip()
-    }
+    )
 
 
 def _is_shallow_repository(repository: Path) -> bool:

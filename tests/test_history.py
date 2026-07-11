@@ -72,6 +72,13 @@ ignore_remotes = ["github.com/acme/*"]
         with pytest.raises(HistoryScanError, match=r"history\.roots"):
             load_history_config(without_roots)
 
+    def test_wraps_invalid_toml_syntax(self, tmp_path: Path) -> None:
+        config_path = tmp_path / "qwen-commit.toml"
+        config_path.write_text("[history\nroots = []\n", encoding="utf-8")
+
+        with pytest.raises(HistoryScanError, match="Invalid TOML configuration"):
+            load_history_config(config_path)
+
     def test_rejects_empty_and_blank_root_entries(self, tmp_path: Path) -> None:
         empty_roots = tmp_path / "empty-roots.toml"
         blank_roots = tmp_path / "blank-roots.toml"
@@ -116,7 +123,7 @@ class TestScan:
         second_repository = helpers.create_repository(
             root / "second",
             "person@example.com",
-            commit_author_email="other@example.com",
+            commit_author_email="person@example.com",
         )
 
         report = scan_history(HistoryConfig(roots=(root,)))
@@ -125,6 +132,7 @@ class TestScan:
         assert report.discovered_repository_count == 2
         assert report.included_repository_count == 2
         assert report.commit_count == 3
+        assert report.author_email_count == 1
         assert scans[first_repository].commit_count == 2
         assert scans[first_repository].author_email_count == 1
         assert scans[second_repository].commit_count == 1
@@ -132,11 +140,15 @@ class TestScan:
 
     def test_applies_path_and_remote_ignore_globs(self, tmp_path: Path) -> None:
         root = tmp_path / "repositories"
-        included_repository = helpers.create_repository(root / "included", "person@example.com")
+        included_repository = helpers.create_repository(
+            root / "included", "person@example.com"
+        )
         path_ignored_repository = helpers.create_repository(
             root / "archive" / "old", "person@example.com"
         )
-        remote_ignored_repository = helpers.create_repository(root / "remote", "person@example.com")
+        remote_ignored_repository = helpers.create_repository(
+            root / "remote", "person@example.com"
+        )
         helpers.git(
             remote_ignored_repository,
             "remote",
@@ -156,7 +168,14 @@ class TestScan:
         statuses = {scan.path: scan.status for scan in report.repositories}
         assert statuses[included_repository] is RepositoryScanStatus.INCLUDED
         assert statuses[path_ignored_repository] is RepositoryScanStatus.IGNORED_PATH
-        assert statuses[remote_ignored_repository] is RepositoryScanStatus.IGNORED_REMOTE
+        assert (
+            statuses[remote_ignored_repository] is RepositoryScanStatus.IGNORED_REMOTE
+        )
+        scans = {scan.path: scan for scan in report.repositories}
+        assert scans[path_ignored_repository].commit_count == 0
+        assert scans[path_ignored_repository].author_email_count == 0
+        assert scans[remote_ignored_repository].commit_count == 0
+        assert scans[remote_ignored_repository].author_email_count == 0
         assert report.commit_count == 1
 
     def test_preserves_config_on_report(self, tmp_path: Path) -> None:
@@ -175,7 +194,9 @@ class TestScan:
             tmp_path / "source", "person@example.com", commit_count=2
         )
         clone = tmp_path / "clone"
-        helpers.git(tmp_path, "clone", "--quiet", "--depth", "1", source.as_uri(), str(clone))
+        helpers.git(
+            tmp_path, "clone", "--quiet", "--depth", "1", source.as_uri(), str(clone)
+        )
 
         report = scan_history(HistoryConfig(roots=(clone,)))
 
@@ -184,8 +205,12 @@ class TestScan:
 
     def test_continues_when_remote_url_is_misconfigured(self, tmp_path: Path) -> None:
         root = tmp_path / "repositories"
-        repository = helpers.create_repository(root / "broken-remote", "person@example.com")
-        helpers.git(repository, "remote", "add", "origin", "https://github.com/example/repo.git")
+        repository = helpers.create_repository(
+            root / "broken-remote", "person@example.com"
+        )
+        helpers.git(
+            repository, "remote", "add", "origin", "https://github.com/example/repo.git"
+        )
         # Simulate a broken remote by removing its URL from the git config.
         helpers.git(repository, "config", "--unset", "remote.origin.url")
 
@@ -226,15 +251,25 @@ class TestReport:
             "shallow",
             "status",
         }
+        assert "author_emails" not in payload["repositories"][0]
 
     def test_normalise_remote_slug(self) -> None:
-        assert normalise_remote_slug("git@github.com:owner/repo.git") == "github.com/owner/repo"
-        assert normalise_remote_slug("git@github.com:owner/repo") == "github.com/owner/repo"
+        assert (
+            normalise_remote_slug("git@github.com:owner/repo.git")
+            == "github.com/owner/repo"
+        )
+        assert (
+            normalise_remote_slug("git@github.com:owner/repo")
+            == "github.com/owner/repo"
+        )
         assert (
             normalise_remote_slug("git@bitbucket.org:team/project.git")
             == "bitbucket.org/team/project"
         )
-        assert normalise_remote_slug("https://github.com/owner/repo.git") == "github.com/owner/repo"
+        assert (
+            normalise_remote_slug("https://github.com/owner/repo.git")
+            == "github.com/owner/repo"
+        )
 
 
 # ---------------------------------------------------------------------------

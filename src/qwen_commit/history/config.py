@@ -16,8 +16,11 @@ def load_history_config(path: Path) -> HistoryConfig:
     if not path.is_file():
         raise HistoryScanError(f"History configuration is not a file: {path}")
 
-    with path.open("rb") as config_file:
-        document = tomllib.load(config_file)
+    try:
+        with path.open("rb") as config_file:
+            document = tomllib.load(config_file)
+    except tomllib.TOMLDecodeError as error:
+        raise HistoryScanError(f"Invalid TOML configuration in {path}: {error}") from error
 
     if "history" not in document:
         raise HistoryScanError("The configuration file must define a [history] table.")

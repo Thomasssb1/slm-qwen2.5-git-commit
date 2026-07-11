@@ -31,9 +31,13 @@ class RepositoryScan:
 
     path: Path
     status: RepositoryScanStatus
-    commit_count: int | None
-    author_email_count: int | None
+    commit_count: int
+    author_emails: frozenset[str]
     shallow: bool
+
+    @property
+    def author_email_count(self) -> int:
+        return len(self.author_emails)
 
 
 @dataclass(frozen=True)
@@ -50,7 +54,8 @@ class HistoryScanReport:
     @property
     def included_repository_count(self) -> int:
         return sum(
-            repository.status is RepositoryScanStatus.INCLUDED for repository in self.repositories
+            repository.status is RepositoryScanStatus.INCLUDED
+            for repository in self.repositories
         )
 
     @property
@@ -64,17 +69,20 @@ class HistoryScanReport:
     @property
     def commit_count(self) -> int:
         return sum(
-            repository.commit_count or 0
+            repository.commit_count
             for repository in self.repositories
             if repository.status is RepositoryScanStatus.INCLUDED
         )
 
     @property
     def author_email_count(self) -> int:
-        return sum(
-            repository.author_email_count or 0
-            for repository in self.repositories
-            if repository.status is RepositoryScanStatus.INCLUDED
+        return len(
+            set(
+                email
+                for repository in self.repositories
+                if repository.status is RepositoryScanStatus.INCLUDED
+                for email in repository.author_emails
+            )
         )
 
     def to_json(self) -> str:
