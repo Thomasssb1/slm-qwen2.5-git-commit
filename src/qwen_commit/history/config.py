@@ -26,10 +26,12 @@ def load_history_config(path: Path) -> HistoryConfig:
     if not isinstance(history, dict):
         raise HistoryScanError("The [history] configuration section must be a table.")
 
-    roots = tuple(dict.fromkeys(
-        _resolve_config_path(value, path.parent)
-        for value in _required_string_list(history, "roots", "history.roots")
-    ))
+    roots = tuple(
+        dict.fromkeys(
+            _resolve_config_path(value, path.parent)
+            for value in _required_string_list(history, "roots", "history.roots")
+        )
+    )
     if not roots:
         raise HistoryScanError("history.roots must contain at least one path.")
 

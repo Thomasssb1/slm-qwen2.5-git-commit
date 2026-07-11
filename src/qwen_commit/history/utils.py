@@ -10,8 +10,6 @@ from urllib.parse import urlsplit
 from qwen_commit.history.errors import HistoryScanError
 
 
-
-
 def normalise_remote_slug(url: str) -> str:
     """Convert common Git remote URLs to a comparable host/path slug."""
 

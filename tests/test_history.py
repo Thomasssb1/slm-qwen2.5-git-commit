@@ -234,9 +234,7 @@ class TestReport:
             normalise_remote_slug("git@bitbucket.org:team/project.git")
             == "bitbucket.org/team/project"
         )
-        assert (
-            normalise_remote_slug("https://github.com/owner/repo.git") == "github.com/owner/repo"
-        )
+        assert normalise_remote_slug("https://github.com/owner/repo.git") == "github.com/owner/repo"
 
 
 # ---------------------------------------------------------------------------
@@ -299,4 +297,3 @@ class TestHistoryScanCLI:
         )
 
         assert result.exit_code != 0
-

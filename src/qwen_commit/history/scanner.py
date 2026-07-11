@@ -33,16 +33,12 @@ def scan_history(config: HistoryConfig) -> HistoryScanReport:
 
         if matches_any(path_candidates, config.ignore_repositories):
             scans.append(
-                RepositoryScan(
-                    repository, RepositoryScanStatus.IGNORED_PATH, None, None, False
-                )
+                RepositoryScan(repository, RepositoryScanStatus.IGNORED_PATH, None, None, False)
             )
             continue
         if matches_any(remote_slugs, config.ignore_remotes):
             scans.append(
-                RepositoryScan(
-                    repository, RepositoryScanStatus.IGNORED_REMOTE, None, None, False
-                )
+                RepositoryScan(repository, RepositoryScanStatus.IGNORED_REMOTE, None, None, False)
             )
             continue
 
@@ -73,27 +69,19 @@ def discover_repositories(roots: tuple[Path, ...]) -> tuple[Path, ...]:
         for current, directories, files in os.walk(root):
             if ".git" not in directories and ".git" not in files:
                 continue
-            directories[:] = [
-                directory for directory in directories if directory != ".git"
-            ]
+            directories[:] = [directory for directory in directories if directory != ".git"]
             repository = Path(current).resolve()
             if _is_work_tree(repository):
                 repositories.add(repository)
 
-    return tuple(
-        sorted(repositories, key=lambda repository: repository.as_posix().casefold())
-    )
+    return tuple(sorted(repositories, key=lambda repository: repository.as_posix().casefold()))
 
 
-def _repository_path_candidates(
-    repository: Path, roots: tuple[Path, ...]
-) -> tuple[str, ...]:
+def _repository_path_candidates(repository: Path, roots: tuple[Path, ...]) -> tuple[str, ...]:
     candidates = [repository.name, repository.as_posix()]
     for root in roots:
         try:
-            candidates.append(
-                repository.relative_to(root.expanduser().resolve()).as_posix()
-            )
+            candidates.append(repository.relative_to(root.expanduser().resolve()).as_posix())
         except ValueError:
             continue
     return tuple(candidates)
@@ -104,8 +92,7 @@ def _remote_slugs(repository: Path) -> tuple[str, ...]:
     slugs: set[str] = set()
     for remote in remotes:
         slugs.update(
-            normalise_remote_slug(url)
-            for url in _repository_remote_urls(repository, remote)
+            normalise_remote_slug(url) for url in _repository_remote_urls(repository, remote)
         )
     return tuple(sorted(slugs))
 
