@@ -8,4 +8,4 @@ ignore_remotes = ["github.com/example/ignored-repository"]
 
 [candidates]
 # Optional author names treated as automated commit identities.
-bot_names = ["claude", "codex", "copilot", "dependabot", "github-actions"]
+bot_names = ["dependabot[bot]", "github-actions[bot]", "Copilot", "Claude", "Codex"]
