@@ -13,7 +13,7 @@ from qwen_commit.candidates.models import Candidate, Provenance
 
 _CANDIDATE_SCHEMA = pa.schema(
     [
-        pa.field("example_id", pa.string(), nullable=False),
+        pa.field("id", pa.string(), nullable=False),
         pa.field("repository_group_id", pa.string(), nullable=False),
         pa.field("subject", pa.string(), nullable=False),
         pa.field("diff", pa.string(), nullable=False),
@@ -23,7 +23,7 @@ _CANDIDATE_SCHEMA = pa.schema(
 )
 _PROVENANCE_SCHEMA = pa.schema(
     [
-        pa.field("example_id", pa.string(), nullable=False),
+        pa.field("id", pa.string(), nullable=False),
         pa.field("repository_group_id", pa.string(), nullable=False),
         pa.field("repository_path", pa.string(), nullable=False),
         pa.field("remote_urls", pa.list_(pa.string()), nullable=False),

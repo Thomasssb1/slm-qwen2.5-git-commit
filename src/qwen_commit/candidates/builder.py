@@ -81,7 +81,7 @@ def build_candidates(
                 candidates.append(candidate)
                 provenance.append(
                     Provenance(
-                        example_id=candidate.example_id,
+                        id=candidate.id,
                         repository_group_id=repository_group_id,
                         repository_path=str(repository.path),
                         remote_urls=remote_urls,
@@ -101,8 +101,8 @@ def build_candidates(
 
         logger.info("Finished scanning repository: %s", repository.path)
 
-    candidates.sort(key=lambda candidate: candidate.example_id)
-    provenance.sort(key=lambda entry: entry.example_id)
+    candidates.sort(key=lambda candidate: candidate.id)
+    provenance.sort(key=lambda entry: entry.id)
     write_parquet(candidates, provenance, candidates_path, provenance_path)
     logger.info(
         "Candidate build complete: %d accepted, %d rejected",
@@ -145,10 +145,10 @@ def _extract_candidate(
         return None, CandidateRejectionReason.GENERATED_ONLY
 
     diff = normalise_patch_text(_commit_diff(repository, commit_sha))
-    example_id = opaque_id("example", f"{repository_group_id}\0{commit_sha}")
+    candidate_id = opaque_id("candidate", f"{repository_group_id}\0{commit_sha}")
     return (
         Candidate(
-            example_id=example_id,
+            id=candidate_id,
             repository_group_id=repository_group_id,
             subject=subject,
             diff=diff,

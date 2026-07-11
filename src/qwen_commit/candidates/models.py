@@ -26,7 +26,7 @@ class CandidateRejectionReason(StrEnum):
 class Candidate:
     """One training-safe commit-message example."""
 
-    example_id: str
+    id: str
     repository_group_id: str
     subject: str
     diff: str
@@ -38,7 +38,7 @@ class Candidate:
 class Provenance:
     """Private source mapping for one accepted candidate."""
 
-    example_id: str
+    id: str
     repository_group_id: str
     repository_path: str
     remote_urls: tuple[str, ...]

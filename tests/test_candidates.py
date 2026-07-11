@@ -62,7 +62,7 @@ class TestCandidateBuild:
         assert report.scan_report.included_repository_count == 1
         assert report.scan_report.commit_count == 1
         assert set(candidates[0]) == {
-            "example_id",
+            "id",
             "repository_group_id",
             "subject",
             "diff",
@@ -75,7 +75,7 @@ class TestCandidateBuild:
         assert str(repository) not in candidate_text
         assert "person@example.com" not in candidate_text
         assert set(provenance[0]) == {
-            "example_id",
+            "id",
             "repository_group_id",
             "repository_path",
             "remote_urls",
