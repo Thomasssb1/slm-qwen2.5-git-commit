@@ -39,6 +39,10 @@ def build_candidates(
     for repository in scan_report.repositories:
         if repository.status is not RepositoryScanStatus.INCLUDED:
             continue
+        if repository.shallow:
+            raise CandidateBuildError(
+                f"{repository.path}: shallow repository history cannot build candidates."
+            )
         repository_group_id = opaque_id("repository", str(repository.path))
         remote_urls = _remote_urls(repository.path)
         for commit_sha in _commit_shas(repository.path):

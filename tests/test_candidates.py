@@ -10,7 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 import helpers
-from qwen_commit.candidates import CandidateRejectionReason, build_candidates
+from qwen_commit.candidates import CandidateBuildError, CandidateRejectionReason, build_candidates
 from qwen_commit.cli import app
 from qwen_commit.history import HistoryConfig, scan_history
 
@@ -127,6 +127,18 @@ class TestCandidateBuild:
         assert (tmp_path / "first" / "provenance.parquet").read_bytes() == (
             tmp_path / "second" / "provenance.parquet"
         ).read_bytes()
+
+    def test_rejects_shallow_repository(self, tmp_path: Path) -> None:
+        source = helpers.create_repository(
+            tmp_path / "source", "person@example.com", commit_count=2
+        )
+        root = tmp_path / "repositories"
+        root.mkdir()
+        clone = root / "shallow"
+        helpers.git(tmp_path, "clone", "--quiet", "--depth", "1", source.as_uri(), str(clone))
+
+        with pytest.raises(CandidateBuildError, match="shallow repository"):
+            self._build(root, tmp_path / "output")
 
 
 class TestCandidateBuildCLI:
