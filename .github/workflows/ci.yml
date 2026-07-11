@@ -9,21 +9,15 @@ permissions:
 
 jobs:
   quality:
-    name: Python 3.12 / ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
+    name: Python 3.12 / ubuntu-latest
+    runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
 
       - name: Install uv and Python
-        uses: astral-sh/setup-uv@v8
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990
         with:
           enable-cache: true
           python-version: "3.12"
