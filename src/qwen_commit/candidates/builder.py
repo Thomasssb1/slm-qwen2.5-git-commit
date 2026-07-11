@@ -30,6 +30,7 @@ def build_candidates(
     scan_report: HistoryScanReport,
     candidates_path: Path,
     provenance_path: Path,
+    bot_names: tuple[str, ...] = (),
 ) -> CandidateBuildReport:
     """Extract accepted commits from included repositories into private Parquet files."""
     candidates: list[Candidate] = []
@@ -52,7 +53,7 @@ def build_candidates(
                 repository_group_id,
                 commit_sha,
                 metadata,
-                scan_report.config.bot_names,
+                bot_names,
             )
             if rejected_as:
                 rejection_counts[rejected_as] += 1
@@ -93,13 +94,13 @@ def _extract_candidate(
     metadata: tuple[tuple[str, ...], str, str, str, str],
     bot_names: tuple[str, ...],
 ) -> tuple[Candidate | None, CandidateRejectionReason | None]:
-    parents, subject, author_name, author_email, committed_at = metadata
+    parents, subject, author_name, _author_email, committed_at = metadata
     subject = normalise_subject(subject)
     if len(parents) > 1:
         return None, CandidateRejectionReason.MERGE
     if not subject:
         return None, CandidateRejectionReason.EMPTY_SUBJECT
-    if is_bot(author_name, author_email, bot_names):
+    if is_bot(author_name, bot_names):
         return None, CandidateRejectionReason.BOT
     if is_fixup(subject):
         return None, CandidateRejectionReason.FIXUP

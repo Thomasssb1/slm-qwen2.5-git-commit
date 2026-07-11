@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 import helpers
 from qwen_commit.cli import app
+from qwen_commit.config import load_config
 from qwen_commit.history import (
     HistoryConfig,
     HistoryScanError,
@@ -36,6 +37,9 @@ class TestConfig:
 roots = ["repositories"]
 ignore_repositories = ["archive/*"]
 ignore_remotes = ["github.com/acme/*"]
+
+[candidates]
+bot_names = ["Copilot", "Codex"]
 """,
             encoding="utf-8",
         )
@@ -45,6 +49,7 @@ ignore_remotes = ["github.com/acme/*"]
         assert config.roots == ((tmp_path / "repositories").resolve(),)
         assert config.ignore_repositories == ("archive/*",)
         assert config.ignore_remotes == ("github.com/acme/*",)
+        assert load_config(config_path).candidates.bot_names == ("Copilot", "Codex")
 
     def test_resolves_absolute_roots(self, tmp_path: Path) -> None:
         config_path = tmp_path / "qwen-commit.toml"

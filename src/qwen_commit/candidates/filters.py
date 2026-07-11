@@ -5,16 +5,7 @@ from __future__ import annotations
 import unicodedata
 from pathlib import PurePosixPath
 
-_BOT_NAMES = frozenset(
-    {
-        "dependabot",
-        "github-actions",
-        "greenkeeper",
-        "renovate",
-        "semantic-release-bot",
-    }
-)
-_GENERATED_PATH_PATTERNS = (
+_GENERATED_FILE_PATTERNS = (
     "*.designer.cs",
     "*.generated.*",
     "*.g.cs",
@@ -24,16 +15,8 @@ _GENERATED_PATH_PATTERNS = (
     "*.snap",
     "*.svgz",
     "*.map",
-    "build/*",
-    "dist/*",
-    "node_modules/*",
-    "vendor/*",
-    "*/__pycache__/*",
-    "*/build/*",
-    "*/dist/*",
-    "*/node_modules/*",
-    "*/vendor/*",
 )
+_GENERATED_DIRECTORY_NAMES = frozenset({"__pycache__", "build", "dist", "node_modules", "vendor"})
 
 
 def normalise_subject(subject: str) -> str:
@@ -46,11 +29,11 @@ def normalise_patch_text(patch: str) -> str:
     return unicodedata.normalize("NFC", patch).replace("\r\n", "\n").replace("\r", "\n")
 
 
-def is_bot(author_name: str, author_email: str) -> bool:
+def is_bot(author_name: str, bot_names: tuple[str, ...]) -> bool:
     """Recognise clear automated commit identities without guessing about people."""
     name = author_name.strip().casefold()
-    email = author_email.strip().casefold()
-    return "[bot]" in name or name in _BOT_NAMES or email.startswith("dependabot[")
+    configured_names = frozenset(bot_name.casefold() for bot_name in bot_names)
+    return name in configured_names
 
 
 def is_fixup(subject: str) -> bool:
@@ -60,7 +43,12 @@ def is_fixup(subject: str) -> bool:
 
 def is_generated_only(paths: tuple[str, ...]) -> bool:
     """Return whether every changed path is a known generated artifact."""
-    return bool(paths) and all(
-        any(PurePosixPath(path).match(pattern) for pattern in _GENERATED_PATH_PATTERNS)
-        for path in paths
+    return bool(paths) and all(_is_generated_path(path) for path in paths)
+
+
+def _is_generated_path(path: str) -> bool:
+    parsed_path = PurePosixPath(path)
+    return bool(
+        _GENERATED_DIRECTORY_NAMES.intersection(parsed_path.parts)
+        or any(parsed_path.match(pattern) for pattern in _GENERATED_FILE_PATTERNS)
     )

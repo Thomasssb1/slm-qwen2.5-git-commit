@@ -11,20 +11,35 @@ from typer.testing import CliRunner
 
 import helpers
 from qwen_commit.candidates import CandidateBuildError, CandidateRejectionReason, build_candidates
+from qwen_commit.candidates.filters import is_bot
 from qwen_commit.cli import app
 from qwen_commit.history import HistoryConfig, scan_history
 
 runner = CliRunner()
 
 
+class TestCandidateFilters:
+    @pytest.mark.parametrize(
+        "author_name",
+        ["Copilot", "Codex", "Claude", "Dependabot", "github-actions"],
+    )
+    def test_recognizes_known_automation_names(self, author_name: str) -> None:
+        assert is_bot(author_name, ("claude", "codex", "copilot", "dependabot", "github-actions"))
+
+    def test_uses_configured_bot_names(self) -> None:
+        assert is_bot("Review Automation", ("Review Automation",))
+        assert not is_bot("Codex", ("Review Automation",))
+
+
 class TestCandidateBuild:
     @staticmethod
-    def _build(repository_root: Path, output_root: Path):
+    def _build(repository_root: Path, output_root: Path, bot_names: tuple[str, ...] = ()):
         output_root.mkdir(exist_ok=True)
         return build_candidates(
             scan_history(HistoryConfig(roots=(repository_root,))),
             output_root / "candidates.parquet",
             output_root / "provenance.parquet",
+            bot_names,
         )
 
     def test_writes_candidate_and_provenance(self, tmp_path: Path) -> None:
@@ -86,7 +101,7 @@ class TestCandidateBuild:
             author_name="automation[bot]",
             author_email="bot@example.com",
         )
-        helpers.commit_file(repository, "dist/bundle.min.js", "var x=1;\n", "Build bundle")
+        helpers.commit_file(repository, "dist/js/app.js", "var x=1;\n", "Build bundle")
         helpers.commit_file(repository, "image.bin", b"\x00\x01\x02", "Add image")
         helpers.git(repository, "commit", "--quiet", "--allow-empty", "-m", "Empty change")
 
@@ -96,7 +111,7 @@ class TestCandidateBuild:
         helpers.commit_file(repository, "main.txt", "main\n", "Add main")
         helpers.git(repository, "merge", "--quiet", "--no-ff", "feature", "-m", "Merge feature")
 
-        report = self._build(root, tmp_path)
+        report = self._build(root, tmp_path, ("automation[bot]",))
 
         assert report.accepted_count == 3
         assert report.rejection_counts == {
