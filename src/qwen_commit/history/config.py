@@ -26,10 +26,10 @@ def load_history_config(path: Path) -> HistoryConfig:
     if not isinstance(history, dict):
         raise HistoryScanError("The [history] configuration section must be a table.")
 
-    roots = tuple(
+    roots = tuple(dict.fromkeys(
         _resolve_config_path(value, path.parent)
         for value in _required_string_list(history, "roots", "history.roots")
-    )
+    ))
     if not roots:
         raise HistoryScanError("history.roots must contain at least one path.")
 
@@ -62,7 +62,10 @@ def _optional_string_list(
 def _string_list(value: object, setting_name: str) -> tuple[str, ...]:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise HistoryScanError(f"{setting_name} must be an array of strings.")
-    return tuple(item for item in value if item.strip())
+    for item in value:
+        if not item.strip():
+            raise HistoryScanError(f"{setting_name} must not contain blank entries.")
+    return tuple(value)
 
 
 def _resolve_config_path(value: str, config_directory: Path) -> Path:

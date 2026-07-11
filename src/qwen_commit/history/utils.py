@@ -10,9 +10,6 @@ from urllib.parse import urlsplit
 from qwen_commit.history.errors import HistoryScanError
 
 
-def unique_paths(paths: tuple[Path, ...]) -> tuple[Path, ...]:
-    """Expand, resolve, and deduplicate filesystem paths in input order."""
-    return tuple(dict.fromkeys(path.expanduser().resolve() for path in paths))
 
 
 def normalise_remote_slug(url: str) -> str:
