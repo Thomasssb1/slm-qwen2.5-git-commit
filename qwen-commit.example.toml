@@ -7,5 +7,5 @@ ignore_repositories = ["archive/*"]
 ignore_remotes = ["github.com/example/ignored-repository"]
 
 [candidates]
-# Optional author names treated as automated commit identities.
-bot_names = ["dependabot[bot]", "github-actions[bot]", "Copilot", "Claude", "Codex"]
+# Exact author email identities to include; matching is case-insensitive.
+author_emails = ["you@example.com"]
