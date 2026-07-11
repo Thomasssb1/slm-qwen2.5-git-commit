@@ -19,6 +19,7 @@ qwen-commit = "qwen_commit.cli:app"
 
 [dependency-groups]
 dev = [
+    "pre-commit>=4.6,<5",
     "pytest>=8.3,<10",
     "ruff>=0.11,<1",
 ]
@@ -40,4 +41,3 @@ select = ["B", "E4", "E7", "E9", "F", "I", "RUF", "UP"]
 
 [tool.uv]
 required-version = ">=0.10,<0.12"
-
