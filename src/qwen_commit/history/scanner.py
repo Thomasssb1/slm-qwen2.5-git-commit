@@ -21,10 +21,6 @@ from qwen_commit.history.utils import (
 
 def scan_history(config: HistoryConfig) -> HistoryScanReport:
     """Discover repositories and count commits without storing Git content."""
-
-    def shallow(repository: Path) -> bool:
-        return git_output(repository, "rev-parse", "--is-shallow-repository") == "true"
-
     if not config.roots:
         raise HistoryScanError("Configure at least one history.roots entry.")
 
@@ -53,7 +49,7 @@ def scan_history(config: HistoryConfig) -> HistoryScanReport:
                 status=RepositoryScanStatus.INCLUDED,
                 commit_count=len(author_emails),
                 author_email_count=len(set(author_emails)),
-                shallow=shallow(repository),
+                shallow=_is_shallow_repository(repository),
             )
         )
 
@@ -109,6 +105,13 @@ def _commit_author_emails(repository: Path) -> tuple[str, ...]:
         for email in git_output(repository, "log", "--all", "--format=%ae").splitlines()
         if email.strip()
     )
+
+
+def _is_shallow_repository(repository: Path) -> bool:
+    try:
+        return git_output(repository, "rev-parse", "--is-shallow-repository") == "true"
+    except HistoryScanError:
+        return False
 
 
 def _is_work_tree(repository: Path) -> bool:
