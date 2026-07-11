@@ -42,8 +42,8 @@ def matches_any(values: tuple[str, ...], patterns: tuple[str, ...]) -> bool:
     )
 
 
-def git_output(repository: Path, *arguments: str) -> str:
-    """Run a read-only Git command in a repository and return stdout."""
+def git_text(repository: Path, *arguments: str) -> str:
+    """Run a read-only Git command in a repository and return text output."""
     completed = subprocess.run(
         ("git", "-C", str(repository), *arguments),
         check=False,
