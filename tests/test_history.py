@@ -39,7 +39,7 @@ ignore_repositories = ["archive/*"]
 ignore_remotes = ["github.com/acme/*"]
 
 [candidates]
-bot_names = ["Copilot", "Codex"]
+author_emails = ["person@example.com", "123+person@users.noreply.github.com"]
 """,
             encoding="utf-8",
         )
@@ -49,7 +49,10 @@ bot_names = ["Copilot", "Codex"]
         assert config.roots == ((tmp_path / "repositories").resolve(),)
         assert config.ignore_repositories == ("archive/*",)
         assert config.ignore_remotes == ("github.com/acme/*",)
-        assert load_config(config_path).candidates.bot_names == ("Copilot", "Codex")
+        assert load_config(config_path).candidates.author_emails == (
+            "person@example.com",
+            "123+person@users.noreply.github.com",
+        )
 
     def test_resolves_absolute_roots(self, tmp_path: Path) -> None:
         config_path = tmp_path / "qwen-commit.toml"

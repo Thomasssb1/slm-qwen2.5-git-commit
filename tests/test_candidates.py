@@ -11,35 +11,25 @@ from typer.testing import CliRunner
 
 import helpers
 from qwen_commit.candidates import CandidateBuildError, CandidateRejectionReason, build_candidates
-from qwen_commit.candidates.filters import is_bot
 from qwen_commit.cli import app
 from qwen_commit.history import HistoryConfig, scan_history
 
 runner = CliRunner()
 
 
-class TestCandidateFilters:
-    @pytest.mark.parametrize(
-        "author_name",
-        ["Copilot", "Codex", "Claude", "Dependabot", "github-actions"],
-    )
-    def test_recognizes_known_automation_names(self, author_name: str) -> None:
-        assert is_bot(author_name, ("claude", "codex", "copilot", "dependabot", "github-actions"))
-
-    def test_uses_configured_bot_names(self) -> None:
-        assert is_bot("Review Automation", ("Review Automation",))
-        assert not is_bot("Codex", ("Review Automation",))
-
-
 class TestCandidateBuild:
     @staticmethod
-    def _build(repository_root: Path, output_root: Path, bot_names: tuple[str, ...] = ()):
+    def _build(
+        repository_root: Path,
+        output_root: Path,
+        author_emails: tuple[str, ...] = ("person@example.com",),
+    ):
         output_root.mkdir(exist_ok=True)
         return build_candidates(
             scan_history(HistoryConfig(roots=(repository_root,))),
             output_root / "candidates.parquet",
             output_root / "provenance.parquet",
-            bot_names,
+            author_emails,
         )
 
     def test_writes_candidate_and_provenance(self, tmp_path: Path) -> None:
@@ -124,12 +114,12 @@ class TestCandidateBuild:
         helpers.commit_file(repository, "main.txt", "main\n", "Add main")
         helpers.git(repository, "merge", "--quiet", "--no-ff", "feature", "-m", "Merge feature")
 
-        report = self._build(root, tmp_path, ("automation[bot]",))
+        report = self._build(root, tmp_path)
 
         assert report.accepted_count == 3
         assert report.rejection_counts == {
             CandidateRejectionReason.BINARY: 1,
-            CandidateRejectionReason.BOT: 1,
+            CandidateRejectionReason.AUTHOR_NOT_MATCHED: 1,
             CandidateRejectionReason.EMPTY_CHANGE: 1,
             CandidateRejectionReason.FIXUP: 1,
             CandidateRejectionReason.GENERATED_ONLY: 1,
@@ -168,6 +158,18 @@ class TestCandidateBuild:
         with pytest.raises(CandidateBuildError, match="shallow repository"):
             self._build(root, tmp_path / "output")
 
+    def test_requires_author_emails(self, tmp_path: Path) -> None:
+        root = tmp_path / "repositories"
+        helpers.create_repository(root / "personal", "person@example.com")
+
+        with pytest.raises(CandidateBuildError, match="author_emails"):
+            build_candidates(
+                scan_history(HistoryConfig(roots=(root,))),
+                tmp_path / "candidates.parquet",
+                tmp_path / "provenance.parquet",
+                (),
+            )
+
 
 class TestCandidateBuildCLI:
     def test_cli_builds_candidate_and_provenance_parquet(
@@ -179,7 +181,9 @@ class TestCandidateBuildCLI:
         provenance_path = tmp_path / "output" / "provenance.parquet"
         candidates_path.parent.mkdir()
         (tmp_path / "qwen-commit.toml").write_text(
-            f'[history]\nroots = ["{root.as_posix()}"]\n', encoding="utf-8"
+            f'[history]\nroots = ["{root.as_posix()}"]\n\n'
+            '[candidates]\nauthor_emails = ["person@example.com"]\n',
+            encoding="utf-8",
         )
         monkeypatch.chdir(tmp_path)
 

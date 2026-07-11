@@ -10,7 +10,7 @@ from pathlib import Path
 class CandidateConfig:
     """Configuration for candidate extraction."""
 
-    bot_names: tuple[str, ...] = ()
+    author_emails: tuple[str, ...] = ()
 
 
 def parse_candidate_config(
@@ -20,7 +20,9 @@ def parse_candidate_config(
     from qwen_commit.config import optional_string_list
 
     return CandidateConfig(
-        bot_names=optional_string_list(section, "bot_names", "candidates.bot_names", error_type)
+        author_emails=optional_string_list(
+            section, "author_emails", "candidates.author_emails", error_type
+        )
     )
 
 

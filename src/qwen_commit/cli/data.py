@@ -32,7 +32,7 @@ def build_candidate_data(
             scan_history(config.history),
             output_path,
             provenance_path,
-            config.candidates.bot_names,
+            config.candidates.author_emails,
         )
     except (CandidateBuildError, HistoryScanError, OSError) as error:
         raise typer.BadParameter(str(error)) from error

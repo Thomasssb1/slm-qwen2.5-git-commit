@@ -29,13 +29,6 @@ def normalise_patch_text(patch: str) -> str:
     return unicodedata.normalize("NFC", patch).replace("\r\n", "\n").replace("\r", "\n")
 
 
-def is_bot(author_name: str, bot_names: tuple[str, ...]) -> bool:
-    """Recognise clear automated commit identities without guessing about people."""
-    name = author_name.strip().casefold()
-    configured_names = frozenset(bot_name.casefold() for bot_name in bot_names)
-    return name in configured_names
-
-
 def is_fixup(subject: str) -> bool:
     """Return whether a subject is an autosquash helper commit."""
     return subject.casefold().startswith(("fixup!", "squash!", "amend!"))

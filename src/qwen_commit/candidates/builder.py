@@ -9,7 +9,6 @@ from pathlib import Path
 
 from qwen_commit.candidates.errors import CandidateBuildError
 from qwen_commit.candidates.filters import (
-    is_bot,
     is_fixup,
     is_generated_only,
     normalise_patch_text,
@@ -37,9 +36,15 @@ def build_candidates(
     scan_report: HistoryScanReport,
     candidates_path: Path,
     provenance_path: Path,
-    bot_names: tuple[str, ...] = (),
+    author_emails: tuple[str, ...],
 ) -> CandidateBuildReport:
     """Extract accepted commits from included repositories into private Parquet files."""
+    configured_author_emails = frozenset(
+        email.strip().casefold() for email in author_emails if email.strip()
+    )
+    if not configured_author_emails:
+        raise CandidateBuildError("Configure at least one candidates.author_emails entry.")
+
     candidates: list[Candidate] = []
     provenance: list[Provenance] = []
     rejection_counts: Counter[CandidateRejectionReason] = Counter()
@@ -69,7 +74,7 @@ def build_candidates(
                 repository_group_id,
                 commit_sha,
                 metadata,
-                bot_names,
+                configured_author_emails,
             )
             if rejected_as:
                 rejection_counts[rejected_as] += 1
@@ -123,16 +128,16 @@ def _extract_candidate(
     repository_group_id: str,
     commit_sha: str,
     metadata: tuple[tuple[str, ...], str, str, str, str],
-    bot_names: tuple[str, ...],
+    author_emails: frozenset[str],
 ) -> tuple[Candidate | None, CandidateRejectionReason | None]:
-    parents, subject, author_name, _author_email, committed_at = metadata
+    parents, subject, _author_name, author_email, committed_at = metadata
     subject = normalise_subject(subject)
+    if author_email.strip().casefold() not in author_emails:
+        return None, CandidateRejectionReason.AUTHOR_NOT_MATCHED
     if len(parents) > 1:
         return None, CandidateRejectionReason.MERGE
     if not subject:
         return None, CandidateRejectionReason.EMPTY_SUBJECT
-    if is_bot(author_name, bot_names):
-        return None, CandidateRejectionReason.BOT
     if is_fixup(subject):
         return None, CandidateRejectionReason.FIXUP
 

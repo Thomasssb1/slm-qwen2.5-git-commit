@@ -15,7 +15,7 @@ class CandidateRejectionReason(StrEnum):
 
     MERGE = "merge"
     EMPTY_SUBJECT = "empty_subject"
-    BOT = "bot"
+    AUTHOR_NOT_MATCHED = "author_not_matched"
     FIXUP = "fixup"
     EMPTY_CHANGE = "empty_change"
     BINARY = "binary"
