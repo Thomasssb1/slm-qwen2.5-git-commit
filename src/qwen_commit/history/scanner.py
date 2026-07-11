@@ -33,22 +33,25 @@ def scan_history(config: HistoryConfig) -> HistoryScanReport:
 
         if matches_any(path_candidates, config.ignore_repositories):
             scans.append(
-                RepositoryScan(repository, RepositoryScanStatus.IGNORED_PATH, None, None, False)
+                RepositoryScan(
+                    repository, RepositoryScanStatus.IGNORED_PATH, None, None, False
+                )
             )
             continue
         if matches_any(remote_slugs, config.ignore_remotes):
             scans.append(
-                RepositoryScan(repository, RepositoryScanStatus.IGNORED_REMOTE, None, None, False)
+                RepositoryScan(
+                    repository, RepositoryScanStatus.IGNORED_REMOTE, None, None, False
+                )
             )
             continue
 
-        author_emails = _commit_author_emails(repository)
         scans.append(
             RepositoryScan(
                 path=repository,
                 status=RepositoryScanStatus.INCLUDED,
-                commit_count=len(author_emails),
-                author_email_count=len(set(author_emails)),
+                commit_count=_commit_count(repository),
+                author_email_count=len(_unique_author_emails(repository)),
                 shallow=_is_shallow_repository(repository),
             )
         )
@@ -70,19 +73,27 @@ def discover_repositories(roots: tuple[Path, ...]) -> tuple[Path, ...]:
         for current, directories, files in os.walk(root):
             if ".git" not in directories and ".git" not in files:
                 continue
-            directories[:] = [directory for directory in directories if directory != ".git"]
+            directories[:] = [
+                directory for directory in directories if directory != ".git"
+            ]
             repository = Path(current).resolve()
             if _is_work_tree(repository):
                 repositories.add(repository)
 
-    return tuple(sorted(repositories, key=lambda repository: repository.as_posix().casefold()))
+    return tuple(
+        sorted(repositories, key=lambda repository: repository.as_posix().casefold())
+    )
 
 
-def _repository_path_candidates(repository: Path, roots: tuple[Path, ...]) -> tuple[str, ...]:
+def _repository_path_candidates(
+    repository: Path, roots: tuple[Path, ...]
+) -> tuple[str, ...]:
     candidates = [repository.name, repository.as_posix()]
     for root in roots:
         try:
-            candidates.append(repository.relative_to(root.expanduser().resolve()).as_posix())
+            candidates.append(
+                repository.relative_to(root.expanduser().resolve()).as_posix()
+            )
         except ValueError:
             continue
     return tuple(candidates)
@@ -94,17 +105,30 @@ def _remote_slugs(repository: Path) -> tuple[str, ...]:
     for remote in remotes:
         slugs.update(
             normalise_remote_slug(url)
-            for url in git_output(repository, "remote", "get-url", "--all", remote).splitlines()
+            for url in _repository_remote_urls(repository, remote)
         )
     return tuple(sorted(slugs))
 
 
-def _commit_author_emails(repository: Path) -> tuple[str, ...]:
-    return tuple(
+def _repository_remote_urls(repository: Path, remote: str) -> list[str]:
+    try:
+        return git_output(repository, "remote", "get-url", "--all", remote).splitlines()
+    except HistoryScanError:
+        return []
+
+
+def _commit_count(repository: Path) -> int:
+    """Return the total number of commits reachable from any ref."""
+    output = git_output(repository, "rev-list", "--all", "--count")
+    return int(output) if output else 0
+
+
+def _unique_author_emails(repository: Path) -> set[str]:
+    return {
         email.strip().casefold()
         for email in git_output(repository, "log", "--all", "--format=%ae").splitlines()
         if email.strip()
-    )
+    }
 
 
 def _is_shallow_repository(repository: Path) -> bool:
