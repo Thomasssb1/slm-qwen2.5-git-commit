@@ -48,7 +48,11 @@ def build_candidates(
         for commit_sha in _commit_shas(repository.path):
             metadata = _commit_metadata(repository.path, commit_sha)
             candidate, rejected_as = _extract_candidate(
-                repository.path, repository_group_id, commit_sha, metadata
+                repository.path,
+                repository_group_id,
+                commit_sha,
+                metadata,
+                scan_report.config.bot_names,
             )
             if rejected_as:
                 rejection_counts[rejected_as] += 1
@@ -87,6 +91,7 @@ def _extract_candidate(
     repository_group_id: str,
     commit_sha: str,
     metadata: tuple[tuple[str, ...], str, str, str, str],
+    bot_names: tuple[str, ...],
 ) -> tuple[Candidate | None, CandidateRejectionReason | None]:
     parents, subject, author_name, author_email, committed_at = metadata
     subject = normalise_subject(subject)
@@ -94,7 +99,7 @@ def _extract_candidate(
         return None, CandidateRejectionReason.MERGE
     if not subject:
         return None, CandidateRejectionReason.EMPTY_SUBJECT
-    if is_bot(author_name, author_email):
+    if is_bot(author_name, author_email, bot_names):
         return None, CandidateRejectionReason.BOT
     if is_fixup(subject):
         return None, CandidateRejectionReason.FIXUP

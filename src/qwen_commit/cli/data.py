@@ -6,7 +6,8 @@ from typing import Annotated
 import typer
 
 from qwen_commit.candidates import CandidateBuildError, build_candidates
-from qwen_commit.history import HistoryScanError, load_history_config, scan_history
+from qwen_commit.config import load_config
+from qwen_commit.history import HistoryScanError, scan_history
 
 data_app = typer.Typer(help="Build private training data from configured local Git histories.")
 
@@ -24,10 +25,12 @@ def build_candidate_data(
 ) -> None:
     """Extract filtered historical commits into private Parquet files."""
     try:
+        config = load_config(Path("qwen-commit.toml"))
         report = build_candidates(
-            scan_history(load_history_config(Path("qwen-commit.toml"))),
+            scan_history(config.history),
             output_path,
             provenance_path,
+            config.candidates.bot_names,
         )
     except (CandidateBuildError, HistoryScanError, OSError) as error:
         raise typer.BadParameter(str(error)) from error
