@@ -89,6 +89,19 @@ class TestCandidateBuild:
         assert "git@github.com:example/private-history.git" not in candidate_text
         assert provenance[0]["remote_urls"] == ["git@github.com:example/private-history.git"]
 
+    def test_preserves_trailing_whitespace_in_patch(self, tmp_path: Path) -> None:
+        root = tmp_path / "repositories"
+        repository = helpers.create_repository(root / "personal", "person@example.com")
+        helpers.commit_file(
+            repository, "trailing.txt", "line with spaces   \n", "Add trailing spaces"
+        )
+
+        report = self._build(root, tmp_path)
+        candidates = pq.read_table(report.candidates_path).to_pylist()
+        candidate = next(item for item in candidates if item["subject"] == "Add trailing spaces")
+
+        assert "+line with spaces   " in candidate["diff"].splitlines()
+
     def test_rejects_unsafe_or_unusable_commits(self, tmp_path: Path) -> None:
         root = tmp_path / "repositories"
         repository = helpers.create_repository(root / "personal", "person@example.com")

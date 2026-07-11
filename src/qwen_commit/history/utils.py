@@ -44,6 +44,11 @@ def matches_any(values: tuple[str, ...], patterns: tuple[str, ...]) -> bool:
 
 def git_text(repository: Path, *arguments: str) -> str:
     """Run a read-only Git command in a repository and return text output."""
+    return git_raw_text(repository, *arguments).strip()
+
+
+def git_raw_text(repository: Path, *arguments: str) -> str:
+    """Run a read-only Git command and return stdout without trimming it."""
     completed = subprocess.run(
         ("git", "-C", str(repository), *arguments),
         check=False,
@@ -55,4 +60,4 @@ def git_text(repository: Path, *arguments: str) -> str:
     if completed.returncode != 0:
         message = completed.stderr.strip() or "Git command failed."
         raise HistoryScanError(f"{repository}: {message}")
-    return completed.stdout.strip()
+    return completed.stdout

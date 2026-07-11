@@ -23,7 +23,7 @@ from qwen_commit.candidates.models import (
 from qwen_commit.candidates.storage import write_parquet
 from qwen_commit.candidates.utils import as_utc, opaque_id
 from qwen_commit.history import HistoryScanError, HistoryScanReport, RepositoryScanStatus
-from qwen_commit.history.utils import git_text
+from qwen_commit.history.utils import git_raw_text, git_text
 
 
 def build_candidates(
@@ -182,7 +182,7 @@ def _change_stats(repository: Path, commit_sha: str) -> tuple[tuple[str, ...], b
 
 
 def _commit_diff(repository: Path, commit_sha: str) -> str:
-    return git_text(
+    return git_raw_text(
         repository,
         "diff-tree",
         "--root",
