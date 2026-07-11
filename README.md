@@ -16,6 +16,17 @@ uv run qwen-commit history scan
 It writes `history-scan.json` in the current directory. Use `--json NAME` to choose a
 different report path.
 
+## Candidate dataset
+
+Build the candidate dataset from the configured included repositories:
+
+```console
+uv run qwen-commit data build-candidates
+```
+
+This writes `candidates.parquet` for training and `provenance.parquet` for private source traceability. The builder excludes merge, fixup, bot, binary,
+generated-only, and empty commits. It assumes the configured local history is suitable for collection. It never puts repository paths, remotes, commit SHAs, or author identities in `candidates.parquet` - which is considered the training dataset.
+
 ## Output contract
 
 The model must return exactly one Git commit subject:

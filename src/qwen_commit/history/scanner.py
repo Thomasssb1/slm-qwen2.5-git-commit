@@ -13,7 +13,7 @@ from qwen_commit.history.models import (
     RepositoryScanStatus,
 )
 from qwen_commit.history.utils import (
-    git_output,
+    git_text,
     matches_any,
     normalise_remote_slug,
 )
@@ -91,7 +91,7 @@ def _repository_path_candidates(repository: Path, roots: tuple[Path, ...]) -> tu
 
 
 def _remote_slugs(repository: Path) -> tuple[str, ...]:
-    remotes = git_output(repository, "remote").splitlines()
+    remotes = git_text(repository, "remote").splitlines()
     slugs: set[str] = set()
     for remote in remotes:
         slugs.update(
@@ -102,34 +102,34 @@ def _remote_slugs(repository: Path) -> tuple[str, ...]:
 
 def _repository_remote_urls(repository: Path, remote: str) -> list[str]:
     try:
-        return git_output(repository, "remote", "get-url", "--all", remote).splitlines()
+        return git_text(repository, "remote", "get-url", "--all", remote).splitlines()
     except HistoryScanError:
         return []
 
 
 def _commit_count(repository: Path) -> int:
     """Return the total number of commits reachable from any ref."""
-    output = git_output(repository, "rev-list", "--all", "--count")
+    output = git_text(repository, "rev-list", "--all", "--count")
     return int(output) if output else 0
 
 
 def _unique_author_emails(repository: Path) -> frozenset[str]:
     return frozenset(
         email.strip().casefold()
-        for email in git_output(repository, "log", "--all", "--format=%ae").splitlines()
+        for email in git_text(repository, "log", "--all", "--format=%ae").splitlines()
         if email.strip()
     )
 
 
 def _is_shallow_repository(repository: Path) -> bool:
     try:
-        return git_output(repository, "rev-parse", "--is-shallow-repository") == "true"
+        return git_text(repository, "rev-parse", "--is-shallow-repository") == "true"
     except HistoryScanError:
         return False
 
 
 def _is_work_tree(repository: Path) -> bool:
     try:
-        return git_output(repository, "rev-parse", "--is-inside-work-tree") == "true"
+        return git_text(repository, "rev-parse", "--is-inside-work-tree") == "true"
     except HistoryScanError:
         return False

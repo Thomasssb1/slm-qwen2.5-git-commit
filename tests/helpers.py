@@ -46,3 +46,32 @@ def git(directory: Path, *arguments: str) -> None:
         errors="replace",
         text=True,
     )
+
+
+def commit_file(
+    repository: Path,
+    relative_path: str,
+    contents: str | bytes,
+    subject: str,
+    *,
+    author_name: str | None = None,
+    author_email: str | None = None,
+) -> None:
+    """Write and commit one fixture file, optionally with a distinct author identity."""
+    path = repository / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(contents, bytes):
+        path.write_bytes(contents)
+    else:
+        path.write_text(contents, encoding="utf-8")
+    git(repository, "add", relative_path)
+    arguments = ["commit", "--quiet", "-m", subject]
+    if author_name and author_email:
+        arguments = [
+            "-c",
+            f"user.name={author_name}",
+            "-c",
+            f"user.email={author_email}",
+            *arguments,
+        ]
+    git(repository, *arguments)

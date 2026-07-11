@@ -5,6 +5,7 @@ from typing import Annotated
 import typer
 
 from qwen_commit import __version__
+from qwen_commit.cli.data import data_app
 from qwen_commit.cli.history import history_app
 
 app = typer.Typer(
@@ -15,6 +16,7 @@ app = typer.Typer(
     pretty_exceptions_show_locals=False,
 )
 app.add_typer(history_app, name="history")
+app.add_typer(data_app, name="data")
 
 
 def _show_version(value: bool) -> None:

@@ -8,3 +8,5 @@ dist/
 *.egg-info/
 qwen-commit.toml
 history-scan.json
+candidates.parquet
+provenance.parquet

@@ -5,3 +5,7 @@ roots = ["C:/path/to/your/repositories"]
 # Optional repository-path and remote-slug exclusions.
 ignore_repositories = ["archive/*"]
 ignore_remotes = ["github.com/example/ignored-repository"]
+
+[candidates]
+# Exact author email identities to include; matching is case-insensitive.
+author_emails = ["you@example.com"]
