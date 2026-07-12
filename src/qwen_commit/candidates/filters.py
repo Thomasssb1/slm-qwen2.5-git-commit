@@ -25,7 +25,7 @@ def normalise_subject(subject: str) -> str:
 
 
 def normalise_patch_text(patch: str) -> str:
-    """Normalize Unicode and line endings in Git patch text."""
+    """Normalise Unicode and line endings in Git patch text."""
     return unicodedata.normalize("NFC", patch).replace("\r\n", "\n").replace("\r", "\n")
 
 
