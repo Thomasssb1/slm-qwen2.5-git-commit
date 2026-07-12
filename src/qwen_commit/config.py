@@ -23,6 +23,7 @@ class Config:
 def load_config(path: Path) -> Config:
     """Load and validate the complete TOML configuration."""
     from qwen_commit.candidates.config import parse_candidate_config
+    from qwen_commit.candidates.errors import CandidateBuildError
     from qwen_commit.history.config import parse_history_config
     from qwen_commit.history.errors import HistoryScanError
 
@@ -33,11 +34,11 @@ def load_config(path: Path) -> Config:
 
     candidates_section = document.get("candidates", {})
     if not isinstance(candidates_section, dict):
-        raise HistoryScanError("The [candidates] configuration section must be a table.")
+        raise CandidateBuildError("The [candidates] configuration section must be a table.")
 
     return Config(
         history=parse_history_config(history, path.parent, HistoryScanError),
-        candidates=parse_candidate_config(candidates_section, HistoryScanError),
+        candidates=parse_candidate_config(candidates_section, CandidateBuildError),
     )
 
 
