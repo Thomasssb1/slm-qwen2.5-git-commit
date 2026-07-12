@@ -58,6 +58,8 @@ def commit_file(
     author_email: str | None = None,
 ) -> None:
     """Write and commit one fixture file, optionally with a distinct author identity."""
+    if bool(author_name) != bool(author_email):
+        raise ValueError("Both author_name and author_email must be provided together, or neither.")
     path = repository / relative_path
     path.parent.mkdir(parents=True, exist_ok=True)
     if isinstance(contents, bytes):

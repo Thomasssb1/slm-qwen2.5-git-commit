@@ -10,7 +10,11 @@ import pytest
 from typer.testing import CliRunner
 
 import helpers
-from qwen_commit.candidates import CandidateBuildError, CandidateRejectionReason, build_candidates
+from qwen_commit.candidates import (
+    CandidateBuildError,
+    CandidateRejectionReason,
+    build_candidates,
+)
 from qwen_commit.cli import app
 from qwen_commit.history import HistoryConfig, scan_history
 
@@ -92,6 +96,25 @@ class TestCandidateBuild:
 
         assert "+line with spaces   " in candidate["diff"].splitlines()
 
+    def test_rejects_empty_subject(self, tmp_path: Path) -> None:
+        root = tmp_path / "repositories"
+        repository = helpers.create_repository(root / "personal", "person@example.com")
+        # A commit message consisting only of whitespace collapses to an empty
+        # subject after normalisation and should be rejected.
+        helpers.git(
+            repository,
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "--cleanup=verbatim",
+            "-m",
+            "   ",
+        )
+
+        report = self._build(root, tmp_path)
+
+        assert CandidateRejectionReason.EMPTY_SUBJECT in report.rejection_counts
+
     def test_rejects_unsafe_or_unusable_commits(self, tmp_path: Path) -> None:
         root = tmp_path / "repositories"
         repository = helpers.create_repository(root / "personal", "person@example.com")
@@ -116,6 +139,8 @@ class TestCandidateBuild:
 
         report = self._build(root, tmp_path)
 
+        # 9 commits total; 6 rejected (AUTHOR_NOT_MATCHED, BINARY, EMPTY_CHANGE,
+        # FIXUP, GENERATED_ONLY, MERGE); 3 accepted: Commit 0, Add feature, Add main.
         assert report.accepted_count == 3
         assert report.rejection_counts == {
             CandidateRejectionReason.BINARY: 1,
@@ -139,6 +164,9 @@ class TestCandidateBuild:
         second_provenance = pq.read_table(tmp_path / "second" / "provenance.parquet").to_pylist()
         assert first_candidates == second_candidates
         assert first_provenance == second_provenance
+        assert len(first_candidates) > 0, (
+            "Expected at least one candidate; determinism test is vacuous on empty output"
+        )
         assert (tmp_path / "first" / "candidates.parquet").read_bytes() == (
             tmp_path / "second" / "candidates.parquet"
         ).read_bytes()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import asdict
 from pathlib import Path
 
 import pyarrow as pa
@@ -43,10 +44,10 @@ def write_parquet(
     """Write matching candidate and provenance tables through temporary files."""
     _validate_paths(candidates_path, provenance_path)
     candidate_table = pa.Table.from_pylist(
-        [candidate.__dict__ for candidate in candidates], schema=_CANDIDATE_SCHEMA
+        [asdict(candidate) for candidate in candidates], schema=_CANDIDATE_SCHEMA
     )
     provenance_table = pa.Table.from_pylist(
-        [entry.__dict__ for entry in provenance], schema=_PROVENANCE_SCHEMA
+        [asdict(entry) for entry in provenance], schema=_PROVENANCE_SCHEMA
     )
     pq.write_table(candidate_table, candidates_path, compression="zstd")
     pq.write_table(provenance_table, provenance_path, compression="zstd")
