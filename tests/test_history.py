@@ -49,10 +49,6 @@ author_emails = ["person@example.com", "123+person@users.noreply.github.com"]
         assert config.roots == ((tmp_path / "repositories").resolve(),)
         assert config.ignore_repositories == ("archive/*",)
         assert config.ignore_remotes == ("github.com/acme/*",)
-        assert load_config(config_path).candidates.author_emails == (
-            "person@example.com",
-            "123+person@users.noreply.github.com",
-        )
 
     def test_resolves_absolute_roots(self, tmp_path: Path) -> None:
         config_path = tmp_path / "qwen-commit.toml"
@@ -109,6 +105,28 @@ author_emails = ["person@example.com", "123+person@users.noreply.github.com"]
         config = load_history_config(config_path)
 
         assert config.roots == (root.resolve(),)
+
+
+# ---------------------------------------------------------------------------
+# Candidate config loading
+# ---------------------------------------------------------------------------
+
+
+class TestCandidateConfig:
+    def test_loads_author_emails_from_candidates_section(self, tmp_path: Path) -> None:
+        config_path = tmp_path / "qwen-commit.toml"
+        config_path.write_text(
+            '[history]\nroots = ["repositories"]\n\n'
+            '[candidates]\nauthor_emails = ["person@example.com", "123+person@users.noreply.github.com"]\n',
+            encoding="utf-8",
+        )
+
+        config = load_config(config_path)
+
+        assert config.candidates.author_emails == (
+            "person@example.com",
+            "123+person@users.noreply.github.com",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -265,19 +283,21 @@ class TestReport:
 
 
 class TestHistoryScanCLI:
-    def test_writes_json_report_to_requested_path(self, tmp_path: Path) -> None:
+    def test_writes_json_report_to_requested_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         root = tmp_path / "repositories"
         helpers.create_repository(root / "personal", "person@example.com")
-        config_path = tmp_path / "qwen-commit.toml"
         json_path = tmp_path / "scan.json"
-        config_path.write_text(
+        (tmp_path / "qwen-commit.toml").write_text(
             f'[history]\nroots = ["{root.as_posix()}"]\n',
             encoding="utf-8",
         )
+        monkeypatch.chdir(tmp_path)
 
         result = runner.invoke(
             app,
-            ["history", "scan", "--config", str(config_path), "--json", str(json_path)],
+            ["history", "scan", "--json", str(json_path)],
         )
 
         assert result.exit_code == 0, result.output
@@ -290,32 +310,33 @@ class TestHistoryScanCLI:
     ) -> None:
         root = tmp_path / "repositories"
         helpers.create_repository(root / "personal", "person@example.com")
-        config_path = tmp_path / "qwen-commit.toml"
-        config_path.write_text(
+        (tmp_path / "qwen-commit.toml").write_text(
             f'[history]\nroots = ["{root.as_posix()}"]\n',
             encoding="utf-8",
         )
         monkeypatch.chdir(tmp_path)
 
-        result = runner.invoke(app, ["history", "scan", "--config", str(config_path)])
+        result = runner.invoke(app, ["history", "scan"])
 
         assert result.exit_code == 0, result.output
         assert (tmp_path / "history-scan.json").is_file()
 
-    def test_reports_error_when_json_path_is_unwritable(self, tmp_path: Path) -> None:
+    def test_reports_error_when_json_path_is_unwritable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         root = tmp_path / "repositories"
         helpers.create_repository(root / "personal", "person@example.com")
-        config_path = tmp_path / "qwen-commit.toml"
-        config_path.write_text(
+        (tmp_path / "qwen-commit.toml").write_text(
             f'[history]\nroots = ["{root.as_posix()}"]\n',
             encoding="utf-8",
         )
+        monkeypatch.chdir(tmp_path)
         # Parent directory does not exist, so write_text will raise OSError.
         json_path = tmp_path / "nonexistent_dir" / "scan.json"
 
         result = runner.invoke(
             app,
-            ["history", "scan", "--config", str(config_path), "--json", str(json_path)],
+            ["history", "scan", "--json", str(json_path)],
         )
 
         assert result.exit_code != 0
