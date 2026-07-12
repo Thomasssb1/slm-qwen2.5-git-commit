@@ -5,6 +5,7 @@ from typing import Annotated
 
 import typer
 
+from qwen_commit.candidates import CandidateBuildError
 from qwen_commit.history import (
     HistoryScanError,
     load_history_config,
@@ -25,5 +26,5 @@ def history_scan(
     try:
         report = scan_history(load_history_config(Path("qwen-commit.toml")))
         json_path.write_text(f"{report.to_json()}\n", encoding="utf-8")
-    except (HistoryScanError, OSError) as error:
+    except (CandidateBuildError, HistoryScanError, OSError) as error:
         raise typer.BadParameter(str(error)) from error

@@ -9,6 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 import helpers
+from qwen_commit.candidates import CandidateBuildError
 from qwen_commit.cli import app
 from qwen_commit.config import load_config
 from qwen_commit.history import (
@@ -283,6 +284,16 @@ class TestReport:
 
 
 class TestHistoryScanCLI:
+    def test_reports_candidate_config_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def raise_candidate_error(_config_path: Path) -> None:
+            raise CandidateBuildError("invalid candidates configuration")
+
+        monkeypatch.setattr("qwen_commit.cli.history.load_history_config", raise_candidate_error)
+
+        result = runner.invoke(app, ["history", "scan"])
+
+        assert result.exit_code == 2
+
     def test_writes_json_report_to_requested_path(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
