@@ -149,7 +149,8 @@ def _extract_candidate(
     if is_generated_only(paths):
         return None, CandidateRejectionReason.GENERATED_ONLY
 
-    diff = normalise_patch_text(_commit_diff(repository, commit_sha))
+    raw_diff = _commit_diff(repository, commit_sha)
+    diff = normalise_patch_text(raw_diff)
     candidate_id = opaque_id("candidate", f"{repository_group_id}\0{commit_sha}")
     return (
         Candidate(
@@ -158,7 +159,8 @@ def _extract_candidate(
             subject=subject,
             diff=diff,
             committed_at_utc=as_utc(committed_at),
-            patch_id=_patch_id(repository, diff),
+            # Use the raw diff so the patch_id matches `git patch-id` output exactly.
+            patch_id=_patch_id(repository, raw_diff),
         ),
         None,
     )
