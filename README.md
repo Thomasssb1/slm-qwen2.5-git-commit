@@ -18,14 +18,29 @@ different report path.
 
 ## Candidate dataset
 
+Configure the exact author email identities to include in `qwen-commit.toml`:
+
+```toml
+[candidates]
+author_emails = ["you@example.com"]
+```
+
 Build the candidate dataset from the configured included repositories:
 
 ```console
 uv run qwen-commit data build-candidates
 ```
 
-This writes `candidates.parquet` for training and `provenance.parquet` for private source traceability. The builder excludes merge, fixup, bot, binary,
-generated-only, and empty commits. It assumes the configured local history is suitable for collection. It never puts repository paths, remotes, commit SHAs, or author identities in `candidates.parquet` - which is considered the training dataset.
+This writes `candidates.parquet` for training and `provenance.parquet` for private source traceability. Only commits whose author email matches the configured allowlist are included. The builder also excludes merge, fixup, binary, generated-only, and empty commits. It assumes the configured local history is suitable for collection. It never puts repository paths, remotes, commit SHAs, or author identities in `candidates.parquet` - which is considered the training dataset.
+
+## Prepare the dataset
+
+Open `notebooks/prepare_dataset.ipynb` after building the candidates. Set its input/output paths and optional timezone-aware `datetime` bounds, then run the cells in order. The notebook filters by date, deduplicates patch groups, creates chronological 80/10/10 train/validation/test splits, and writes:
+
+- `prepared/train.parquet`
+- `prepared/validation.parquet`
+- `prepared/test.parquet`
+- `prepared/manifest.json`
 
 ## Output contract
 
