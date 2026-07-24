@@ -25,11 +25,6 @@ dev = [
     "pytest>=8.3,<10",
     "ruff>=0.11,<1",
 ]
-review = [
-    "torch>=2.6,<3",
-    "transformers>=4.37,<5",
-]
-
 [tool.hatch.build.targets.wheel]
 packages = ["src/qwen_commit"]
 
