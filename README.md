@@ -42,6 +42,20 @@ Open `notebooks/prepare_dataset.ipynb` after building the candidates. Set its in
 - `prepared/test.parquet`
 - `prepared/manifest.json`
 
+## Review references
+
+`notebooks/review_references.ipynb` runs its temporary Qwen diff summarizer in a separately provisioned GPU kernel. It is intentionally outside this project's `uv` environment: the PyPI Torch build is not the appropriate runtime for every GPU platform.
+
+### AMD ROCm
+
+On Linux, create a dedicated virtual environment and install the PyTorch ROCm wheel that matches the installed ROCm release, plus `transformers`, `ipykernel`, `pyarrow`, and `whats-that-code`. Register it as a Jupyter kernel, confirm `torch.cuda.is_available()` is `True`, then select it before running the notebook.
+
+### NVIDIA CUDA
+
+Create a dedicated virtual environment and install the PyTorch CUDA wheel that matches the NVIDIA driver and CUDA runtime, plus `transformers`, `ipykernel`, `pyarrow`, and `whats-that-code`. Register it as a Jupyter kernel, confirm `torch.cuda.is_available()` is `True`, then select it before running the notebook.
+
+The GPU kernel and its model cache are review-only local tooling; neither is part of this package or lockfile.
+
 ## Output contract
 
 The model must return exactly one Git commit subject:
