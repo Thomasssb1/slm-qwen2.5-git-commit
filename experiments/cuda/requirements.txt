@@ -1,0 +1,2 @@
+# Dependency used by the current one-batch Parquet smoke test.
+pyarrow==20.0.0
