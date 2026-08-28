@@ -8,10 +8,14 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     TOKENIZERS_PARALLELISM=false \
     TRANSFORMERS_NO_ADVISORY_WARNINGS=1 \
+    VIRTUAL_ENV=/opt/venv \
     WANDB_DISABLED=true
+
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes python3-pip python3.12 python3.12-venv \
+    && python3.12 -m venv "$VIRTUAL_ENV" \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3.12 -m pip install --upgrade pip==25.1.1 \
