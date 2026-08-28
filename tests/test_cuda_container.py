@@ -13,7 +13,7 @@ def test_compose_keeps_data_read_only_artifacts_writable_and_logging_local() -> 
 
     assert "nvidia/cuda:13.2.1-cudnn-runtime-ubuntu24.04" in dockerfile
     assert "https://download.pytorch.org/whl/cu132 torch==2.12.1" in dockerfile
-    assert 'VIRTUAL_ENV=/opt/venv' in dockerfile
+    assert "VIRTUAL_ENV=/opt/venv" in dockerfile
     assert 'ENV PATH="$VIRTUAL_ENV/bin:$PATH"' in dockerfile
     assert 'python3.12 -m venv "$VIRTUAL_ENV"' in dockerfile
     assert "cuda-experiment:" in compose
