@@ -1,0 +1,25 @@
+services:
+  cuda-experiment:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: qwen-commit-cuda:local
+    gpus: all
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    environment:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      TRANSFORMERS_NO_ADVISORY_WARNINGS: "1"
+      WANDB_DISABLED: "true"
+    volumes:
+      - type: bind
+        source: ${QWEN_COMMIT_DATASET_DIR:?Set QWEN_COMMIT_DATASET_DIR to the prepared dataset directory.}
+        target: /datasets
+        read_only: true
+      - type: bind
+        source: ${QWEN_COMMIT_ARTIFACT_DIR:?Set QWEN_COMMIT_ARTIFACT_DIR to an empty private artifact directory.}
+        target: /artifacts
+    command: ["/opt/qwen-commit/smoke_test.py"]

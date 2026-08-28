@@ -12,3 +12,4 @@ history-scan.json
 candidates.parquet
 provenance.parquet
 prepared/
+experiments/cuda/artifacts/
