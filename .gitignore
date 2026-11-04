@@ -13,3 +13,6 @@ candidates.parquet
 provenance.parquet
 prepared/
 experiments/cuda/artifacts/
+experiments/cuda/vast/.terraform/
+experiments/cuda/vast/*.tfstate*
+experiments/cuda/vast/*.tfplan
