@@ -29,7 +29,7 @@ resource "vastai_instance" "smoke" {
 
   search_offer {
     type              = "ondemand"
-    gpu_name          = { eq = var.gpu_name }
+    gpu_name          = { in = distinct([for name in var.gpu_names : trimspace(name)]) }
     num_gpus          = { eq = 1 }
     gpu_ram           = { gte = 24000 }
     cpu_arch          = { eq = "amd64" }

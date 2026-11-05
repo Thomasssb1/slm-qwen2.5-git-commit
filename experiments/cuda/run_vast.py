@@ -24,6 +24,7 @@ CUDA_DIRECTORY = Path(__file__).resolve().parent
 PROJECT_DIRECTORY = CUDA_DIRECTORY.parents[1]
 RUNS_DIRECTORY = CUDA_DIRECTORY / "artifacts" / "vast"
 IMAGE = "qwen-commit-cuda"
+DEFAULT_GPU_NAMES = ["RTX 3090", "RTX PRO 4000"]
 
 
 class RunError(RuntimeError):
@@ -239,7 +240,7 @@ timeout --signal=TERM 300 docker compose --file compose.yaml run --rm --no-build
 def run_smoke(
     dataset: Path,
     *,
-    gpu_name: str,
+    gpu_names: list[str],
     max_hourly_price: float,
     timeout_minutes: float,
     runs_directory: Path = RUNS_DIRECTORY,
@@ -277,7 +278,7 @@ def run_smoke(
         {
             "ssh_public_key": (directory / "id_ed25519.pub").read_text().strip(),
             "run_label": state["label"],
-            "gpu_name": gpu_name,
+            "gpu_names": gpu_names,
             "max_hourly_price": max_hourly_price,
             "rental_seconds": timeout_minutes * 60,
         },
@@ -303,7 +304,11 @@ def run_smoke(
     state["cleanup"] = "pending"
     write_json(directory / "run.json", state)
     deadline = time.monotonic() + timeout_minutes * 60
-    print(f"Renting one {gpu_name}, at most ${max_hourly_price:.2f}/hour...", flush=True)
+    print(
+        f"Renting the cheapest matching GPU from {', '.join(gpu_names)}, "
+        f"at most ${max_hourly_price:.2f}/hour...",
+        flush=True,
+    )
     try:
         # Enter the cleanup scope before apply so partial creation is also torn down.
         terraform(
@@ -386,7 +391,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--dataset", type=Path, default=PROJECT_DIRECTORY / "notebooks/prepared/train.parquet"
     )
-    parser.add_argument("--gpu", default="RTX 3090")
+    parser.add_argument(
+        "--gpu",
+        action="append",
+        dest="gpu_names",
+        metavar="NAME",
+        help="Allowed GPU model; repeat for multiple models. Replaces the default allowlist.",
+    )
     parser.add_argument("--max-hourly-price", type=float, default=0.50)
     parser.add_argument("--timeout-minutes", type=float, default=60)
     parser.add_argument("--dry-run", action="store_true", help="Describe the run without renting.")
@@ -394,6 +405,10 @@ def main(argv: list[str] | None = None) -> int:
         "--cleanup", type=Path, help="Retry teardown for an existing run directory."
     )
     arguments = parser.parse_args(argv)
+    gpu_names = arguments.gpu_names if arguments.gpu_names is not None else DEFAULT_GPU_NAMES
+    if any(not name.strip() for name in gpu_names):
+        parser.error("Provide at least one nonblank GPU model name.")
+    gpu_names = list(dict.fromkeys(name.strip() for name in gpu_names))
     if not 0 < arguments.max_hourly_price <= 10 or not 0 < arguments.timeout_minutes <= 120:
         parser.error("Use a positive hourly limit <= $10 and a time limit <= 120 minutes.")
     if arguments.dry_run:
@@ -401,7 +416,7 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(
                 {
                     "dataset": str(arguments.dataset.resolve()),
-                    "gpu": arguments.gpu,
+                    "gpu_names": gpu_names,
                     "max_hourly_price_usd": arguments.max_hourly_price,
                     "rental_timeout_minutes": arguments.timeout_minutes,
                     "steps": [
@@ -459,7 +474,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             report = run_smoke(
                 arguments.dataset.resolve(),
-                gpu_name=arguments.gpu,
+                gpu_names=gpu_names,
                 max_hourly_price=arguments.max_hourly_price,
                 timeout_minutes=arguments.timeout_minutes,
             )

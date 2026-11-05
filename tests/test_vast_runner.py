@@ -7,6 +7,7 @@ import json
 import shutil
 import subprocess
 import sys
+from functools import partial
 from pathlib import Path
 
 import pyarrow as pa
@@ -169,7 +170,7 @@ def invoke_fake(tmp_path, training_file, failure=None):
     def invoke():
         return runner.run_smoke(
             training_file,
-            gpu_name="RTX 3090",
+            gpu_names=["RTX 3090"],
             max_hourly_price=0.50,
             timeout_minutes=60,
             runs_directory=tmp_path / "runs",
@@ -345,6 +346,54 @@ def test_cli_rejects_invalid_price_before_requiring_credentials(argument, monkey
     assert "positive hourly limit" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("argument", ["", "  ", "\t"])
+def test_cli_rejects_blank_gpu_names_before_requiring_credentials(argument, monkeypatch, capsys):
+    monkeypatch.delenv("VAST_API_KEY", raising=False)
+    monkeypatch.delenv("VASTAI_API_KEY", raising=False)
+    with pytest.raises(SystemExit) as error:
+        runner.main(["--gpu", "RTX 3090", "--gpu", argument])
+    assert error.value.code == 2
+    assert "nonblank GPU model name" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "arguments, expected",
+    [
+        ([], ["RTX 3090", "RTX PRO 4000"]),
+        (["--gpu", "RTX PRO 6000 WS"], ["RTX PRO 6000 WS"]),
+        (
+            ["--gpu", "RTX PRO 4000", "--gpu", "RTX 3090"],
+            ["RTX PRO 4000", "RTX 3090"],
+        ),
+        (
+            ["--gpu", " RTX 3090 ", "--gpu", "RTX PRO 4000", "--gpu", "RTX 3090"],
+            ["RTX 3090", "RTX PRO 4000"],
+        ),
+    ],
+)
+def test_cli_saves_gpu_allowlist_in_terraform_inputs(
+    tmp_path, training_file, monkeypatch, arguments, expected
+):
+    cloud = {"resources": set(), "tracked": set(), "rentals": 0, "uploaded": []}
+    monkeypatch.setenv("VAST_API_KEY", "test-only-placeholder")
+    monkeypatch.setattr(
+        runner,
+        "run_smoke",
+        partial(
+            runner.run_smoke,
+            runs_directory=tmp_path / "runs",
+            commands_type=lambda directory: FakeTools(directory, cloud),
+        ),
+    )
+    assert runner.main(["--dataset", str(training_file), *arguments]) == 0
+    variables_path = next((tmp_path / "runs").glob("*/terraform/run.auto.tfvars.json"))
+    variables = json.loads(variables_path.read_text())
+    assert variables["gpu_names"] == expected
+    assert "gpu_name" not in variables
+    assert saved_run(tmp_path)["outcome"] == "passed"
+    assert cloud["resources"] == set()
+
+
 def test_cli_requires_credentials_before_starting_a_run(monkeypatch, capsys):
     monkeypatch.delenv("VAST_API_KEY", raising=False)
     monkeypatch.delenv("VASTAI_API_KEY", raising=False)
@@ -388,6 +437,13 @@ def test_dry_run_works_without_credentials_and_describes_lifecycle(monkeypatch, 
     assert plan["steps"][0] == "build locally"
     assert plan["steps"][-1] == "terraform destroy"
     assert plan["max_hourly_price_usd"] == 0.50
+    assert plan["gpu_names"] == ["RTX 3090", "RTX PRO 4000"]
+
+
+def test_dry_run_reports_custom_gpu_allowlist(capsys):
+    assert runner.main(["--dry-run", "--gpu", "RTX PRO 4000", "--gpu", "RTX 4090"]) == 0
+    plan = json.loads(capsys.readouterr().out)
+    assert plan["gpu_names"] == ["RTX PRO 4000", "RTX 4090"]
 
 
 def test_command_logs_survive_a_later_cleanup_session(tmp_path):

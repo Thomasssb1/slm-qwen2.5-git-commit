@@ -32,11 +32,16 @@ file transfer, job, report validation, and teardown sequence. It passes the API
 key to Terraform through `VASTAI_API_KEY`, without writing it to configuration
 files or passing it to Docker/SSH subprocesses. No Vast CLI is needed.
 
-Defaults select one verified RTX 3090 VM with at least 24 GB VRAM, CUDA 13.2
-support, 98% host reliability, and 80 GB disk. Offers must cost at most $0.50/hour
+Defaults select one verified RTX 3090 or RTX PRO 4000 VM with at least 24 GB VRAM,
+CUDA 13.2 support, 98% host reliability, and 80 GB disk. Offers must cost at most $0.50/hour
 including the requested storage, with transfer rates no higher than $0.01/GB in
 either direction. Bandwidth and taxes are additional to the hourly quote. If no
 offer matches, the command fails without increasing the budget.
+
+The GPU names form an allowlist. Terraform searches all allowed models together
+and tries the five cheapest matching offers in ascending hourly-price order,
+including storage, until one can be rented. List order does not imply preference;
+"best" means cheapest while meeting every requirement, not highest performance.
 
 Inspect the intended settings without starting Docker, accessing Vast, or renting:
 
@@ -44,11 +49,16 @@ Inspect the intended settings without starting Docker, accessing Vast, or rentin
 uv run python experiments/cuda/run_vast.py --dry-run
 ```
 
-Override the defaults when needed:
+Repeat `--gpu` to replace the default allowlist (one `--gpu` still selects a single
+model). Use exact Vast model names; blank names are rejected:
 
 ```console
-uv run python experiments/cuda/run_vast.py --gpu "RTX 3090" --max-hourly-price 0.40 --timeout-minutes 45 --dataset notebooks/prepared/train.parquet
+uv run python experiments/cuda/run_vast.py --gpu "RTX 3090" --gpu "RTX PRO 4000" --max-hourly-price 0.40 --timeout-minutes 45 --dataset notebooks/prepared/train.parquet
 ```
+
+The corresponding Terraform input is `gpu_names = ["RTX 3090", "RTX PRO 4000"]`
+in `variables.tf`. Custom models must still meet the CUDA, VRAM, VM, and price
+requirements. `run.json` records the model and hourly price actually rented.
 
 The default rental timeout is 60 minutes, starting immediately before Terraform
 apply. Local preparation is outside that window. Cleanup has a separate timeout,
