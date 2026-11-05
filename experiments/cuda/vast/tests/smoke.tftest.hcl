@@ -1,4 +1,3 @@
-# Plan only: no Vast API requests or billable resources.
 provider "vastai" {
   api_key = "unused-local-plan-test"
 }
