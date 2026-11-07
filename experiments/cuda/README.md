@@ -4,8 +4,8 @@ This is the isolated NVIDIA CUDA environment for the base-model, SFT, and DPO wo
 
 ## One-command Vast smoke test
 
-Requires a funded Vast account with `VAST_API_KEY` set, Terraform 1.6 or newer
-(below 2.0), Docker's Linux engine, OpenSSH, and `notebooks/prepared/train.parquet`.
+Requires a funded Vast account with `VAST_API_KEY` set, Terraform < 2.0,
+OpenSSH, and `notebooks/prepared/train.parquet`.
 Run from the repository root:
 
 ```console
@@ -17,12 +17,13 @@ Builds the image locally, rents a GPU VM, tests one training row, downloads
 saved privately under `experiments/cuda/artifacts/vast/`.
 
 Defaults to the cheapest matching RTX 3090 or RTX PRO 4000, up to $0.50/hour
-including storage, with a 60-minute execution timeout. Transfer and taxes are
-extra; the timeout is not a billing cap.
+including storage, with a 60-minute execution timeout.
 
-Use `--dry-run` to preview settings without renting. Repeat `--gpu NAME` to
-replace the GPU allowlist; `--max-hourly-price`, `--timeout-minutes`, and
-`--dataset` override the other defaults.
+- `--dry-run`: preview settings without renting.
+- `--gpu NAME`: replace the default GPU allowlist; repeat for multiple models.
+- `--max-hourly-price USD`: set the maximum hourly price, including storage.
+- `--timeout-minutes N`: set the rental execution timeout.
+- `--dataset PATH`: use a different training Parquet file.
 
 Keep the run directory until cleanup succeeds. Retry failed teardown with:
 
