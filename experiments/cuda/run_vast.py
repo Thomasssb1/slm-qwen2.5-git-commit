@@ -1,4 +1,4 @@
-"""Build, rent, smoke-test, collect results, and destroy a Vast GPU VM."""
+"""Publish, launch a Vast GPU container, collect results, and tear down resources."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from pathlib import Path
 
 from vast_runner import RunError
 from vast_runner.artifacts import PROJECT_DIRECTORY
+from vast_runner.storage import STORAGE_ERRORS
 from vast_runner.terraform import recover
 from vast_runner.workflow import run_smoke
 
@@ -30,6 +31,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--max-hourly-price", type=float, default=0.50)
     parser.add_argument("--timeout-minutes", type=float, default=60)
+    parser.add_argument(
+        "--image-repository",
+        default=os.environ.get("VAST_IMAGE_REPOSITORY", "ghcr.io/thomasssb1/qwen-commit-cuda"),
+        help="Registry repository to push the image to (without a tag).",
+    )
+    parser.add_argument("--aws-region", default=os.environ.get("AWS_REGION"))
     parser.add_argument(
         "--cleanup", type=Path, help="Retry teardown for an existing run directory."
     )
@@ -52,12 +59,14 @@ def main(argv: list[str] | None = None) -> int:
                 gpu_names=gpu_names,
                 max_hourly_price=arguments.max_hourly_price,
                 timeout_minutes=arguments.timeout_minutes,
+                image_repository=arguments.image_repository,
+                aws_region=arguments.aws_region,
             )
             print(f"CUDA smoke test passed. Report: {report}")
     except KeyboardInterrupt:
         print("Interrupted. Check run.json for cleanup status.", file=sys.stderr)
         return 130
-    except (RunError, OSError, ValueError, subprocess.SubprocessError) as error:
+    except (*STORAGE_ERRORS, RunError, OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"CUDA run failed: {error}", file=sys.stderr)
         return 1
     return 0

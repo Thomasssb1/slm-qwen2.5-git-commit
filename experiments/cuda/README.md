@@ -4,17 +4,22 @@ This is the isolated NVIDIA CUDA environment for the base-model, SFT, and DPO wo
 
 ## One-command Vast smoke test
 
-Requires a funded Vast account with `VAST_API_KEY` set, Terraform < 2.0,
-OpenSSH, and `notebooks/prepared/train.parquet`.
+Requires a funded Vast account, Terraform < 2.0, AWS credentials with S3 access,
+and `notebooks/prepared/train.parquet`. Set VAST_API_KEY before running.
+Log Docker into GHCR with permission to push to `ghcr.io/thomasssb1/qwen-commit-cuda`.
+For a private image, set `VAST_IMAGE_LOGIN` to `-u USER -p READ_TOKEN ghcr.io`
+so Vast can pull it.
 Run from the repository root:
 
 ```console
 uv run python experiments/cuda/run_vast.py
 ```
 
-Builds the image locally, rents a GPU VM, tests one training row, downloads
-`cuda-smoke.json`, and attempts teardown. Reports, logs, and recovery state are
-saved privately under `experiments/cuda/artifacts/vast/`.
+Builds and pushes the image, creates a temporary private S3 bucket, and launches
+the image directly on Vast. The container tests one training row using expiring
+transfer URLs. The runner saves `cuda-smoke.json` and `smoke.log`, then destroys
+the rental and bucket, including its objects. The registry image is retained.
+Artifacts and recovery state stay under `experiments/cuda/artifacts/vast/`.
 
 Defaults to the cheapest matching RTX 3090 or RTX PRO 4000, up to $0.50/hour
 including storage, with a 60-minute execution timeout.
@@ -23,6 +28,8 @@ including storage, with a 60-minute execution timeout.
 - `--max-hourly-price USD`: set the maximum hourly price, including storage.
 - `--timeout-minutes N`: set the rental execution timeout.
 - `--dataset PATH`: use a different training Parquet file.
+- `--image-repository REPO`: change the registry repository; also accepts `VAST_IMAGE_REPOSITORY`.
+- `--aws-region REGION`: choose the bucket region; defaults to the AWS configuration or `eu-west-2`.
 
 Keep the run directory until cleanup succeeds. Retry failed teardown with:
 
@@ -30,8 +37,8 @@ Keep the run directory until cleanup succeeds. Retry failed teardown with:
 uv run python experiments/cuda/run_vast.py --cleanup PATH_TO_RUN_DIRECTORY
 ```
 
-If provisioning was interrupted, also check the Vast console for leftover
-resources with the run's `qwen-cuda-...` label.
+If provisioning was interrupted, check Vast and S3 for leftovers named
+`qwen-cuda-...` from the run. Keep the runner open until teardown finishes.
 
 ## Rental-GPU smoke test
 

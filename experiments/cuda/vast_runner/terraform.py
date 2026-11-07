@@ -34,7 +34,7 @@ def cleanup(commands: Commands, state: dict) -> None:
     """Destroy the resources recorded in this run's isolated Terraform state."""
     state["cleanup"] = "pending"
     write_json(commands.directory / "run.json", state)
-    print("Destroying the rental and its temporary SSH key...", flush=True)
+    print("Destroying the rental and its temporary S3 bucket...", flush=True)
     try:
         terraform(commands, "destroy", "-auto-approve", "-input=false", "-no-color", timeout=900)
         if terraform(commands, "state", "list").stdout.strip():
@@ -42,8 +42,8 @@ def cleanup(commands: Commands, state: dict) -> None:
         if not state.get("apply_complete"):
             raise RunError(
                 "Terraform removed its tracked resources, but apply did not finish. "
-                f"Check Vast for untracked resources with label {state['label']} "
-                "and the public key in this run's id_ed25519.pub."
+                f"Check Vast for label {state['label']} and AWS S3 for bucket "
+                f"{state['label'].lower()} to find any untracked resources."
             )
     except BaseException:
         state["cleanup"] = "failed"

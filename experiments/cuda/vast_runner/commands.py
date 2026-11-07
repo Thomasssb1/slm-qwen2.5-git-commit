@@ -21,7 +21,8 @@ class Commands:
         )
         self.environment = os.environ.copy()
         self.api_key = os.environ.get("VAST_API_KEY") or os.environ.get("VASTAI_API_KEY")
-        for name in ("VAST_API_KEY", "VASTAI_API_KEY"):
+        self.image_login = os.environ.get("VAST_IMAGE_LOGIN")
+        for name in ("VAST_API_KEY", "VASTAI_API_KEY", "VAST_IMAGE_LOGIN"):
             self.environment.pop(name, None)
 
     def run(
@@ -46,6 +47,8 @@ class Commands:
             )
             if self.api_key:
                 environment["VASTAI_API_KEY"] = self.api_key
+            if self.image_login:
+                environment["TF_VAR_image_login"] = self.image_login
         with log_path.open("w", encoding="utf-8") as log:
             # Give Terraform a chance to flush state before attempting cleanup.
             process = subprocess.Popen(

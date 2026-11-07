@@ -1,5 +1,36 @@
-variable "ssh_public_key" {
-  type = string
+variable "aws_region" {
+  type    = string
+  default = "eu-west-2"
+}
+
+variable "launch" {
+  description = "Create storage first; launch after the runner uploads the sample."
+  type        = bool
+  default     = false
+}
+
+variable "image" {
+  description = "Published image pinned by registry digest."
+  type        = string
+}
+
+variable "image_login" {
+  description = "Optional docker login arguments for a private registry."
+  type        = string
+  sensitive   = true
+  default     = null
+}
+
+variable "job" {
+  type = object({
+    run_id        = string
+    sample_sha256 = string
+    sample_url    = string
+    result_url    = string
+    hold_seconds  = number
+  })
+  sensitive = true
+  default   = null
 }
 
 variable "run_label" {

@@ -1,23 +1,20 @@
-"""Build, rent, execute, and clean up a CUDA smoke-test run."""
+"""Publish, provision, collect, and clean up a CUDA smoke-test run."""
 
 from __future__ import annotations
 
 import json
-import re
-import shlex
-import shutil
+import math
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
 from . import RunError
-from .artifacts import CUDA_DIRECTORY, RUNS_DIRECTORY, training_sample, validate_report, write_json
+from .artifacts import RUNS_DIRECTORY, training_sample, write_json
 from .commands import Commands
-from .remote import connection, remote_script, ssh_arguments
+from .image import publish
+from .storage import Transfer
 from .terraform import cleanup, terraform
-
-IMAGE = "qwen-commit-cuda"
 
 
 def run_smoke(
@@ -26,8 +23,11 @@ def run_smoke(
     gpu_names: list[str],
     max_hourly_price: float,
     timeout_minutes: float,
+    image_repository: str = "ghcr.io/thomasssb1/qwen-commit-cuda",
+    aws_region: str | None = None,
     runs_directory: Path = RUNS_DIRECTORY,
     commands_type=Commands,
+    transfer_type=Transfer,
 ) -> Path:
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:12]
     directory = (runs_directory / run_id).resolve()
@@ -43,55 +43,34 @@ def run_smoke(
     write_json(directory / "run.json", state)
     print(f"Run artifacts: {directory}", flush=True)
 
-    # All local preparation precedes renting: none of it consumes rental time.
     training_sample(dataset, directory / "train.parquet")
+    transfer = transfer_type(aws_region)
     commands.run(["terraform", "version"])
     commands.run(["docker", "info"])
-    commands.run(["ssh", "-V"])
-    commands.run(["scp"], check=False)
-    commands.run(
-        ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(directory / "id_ed25519")]
-    )
     infrastructure = directory / "terraform"
     infrastructure.mkdir()
-    write_json(
-        infrastructure / "run.auto.tfvars.json",
-        {
-            "ssh_public_key": (directory / "id_ed25519.pub").read_text().strip(),
-            "run_label": state["label"],
-            "gpu_names": gpu_names,
-            "max_hourly_price": max_hourly_price,
-            "rental_seconds": timeout_minutes * 60,
-        },
-    )
     terraform(commands, "init", "-input=false", "-no-color", "-lockfile=readonly", timeout=600)
     terraform(commands, "validate", "-no-color")
-    tag = f"{IMAGE}:{run_id.lower()}"
-    print("Building and exporting the CUDA image locally...", flush=True)
-    commands.run(
-        ["docker", "build", "--platform", "linux/amd64", "-t", tag, str(CUDA_DIRECTORY)],
-        timeout=3600,
-    )
-    image_id = commands.run(
-        ["docker", "image", "inspect", "--format", "{{.Id}}", tag]
-    ).stdout.strip()
-    if not re.fullmatch(r"sha256:[a-f0-9]{64}", image_id):
-        raise RunError("Docker returned an invalid image ID.")
-    state["image_id"] = image_id
-    commands.run(["docker", "save", "--output", str(directory / "image.tar"), tag], timeout=900)
-    shutil.copy2(CUDA_DIRECTORY / "compose.yaml", directory / "compose.yaml")
-
-    state["outcome"] = "running"
-    state["cleanup"] = "pending"
+    image = publish(commands, image_repository, run_id)
+    state["image"] = image
+    variables = {
+        "run_label": state["label"],
+        "gpu_names": gpu_names,
+        "max_hourly_price": max_hourly_price,
+        "rental_seconds": timeout_minutes * 60,
+        "aws_region": transfer.region,
+        "image": image,
+        "launch": False,
+    }
+    write_json(infrastructure / "run.auto.tfvars.json", variables)
+    state.update(outcome="running", cleanup="pending")
     write_json(directory / "run.json", state)
     deadline = time.monotonic() + timeout_minutes * 60
-    print(
-        f"Renting the cheapest matching GPU from {', '.join(gpu_names)}, "
-        f"at most ${max_hourly_price:.2f}/hour...",
-        flush=True,
-    )
-    try:
-        # Enter the cleanup scope before apply so partial creation is also torn down.
+
+    def apply():
+        # Reset before each apply: a lost creation response can leave untracked resources.
+        state["apply_complete"] = False
+        write_json(directory / "run.json", state)
         terraform(
             commands,
             "apply",
@@ -102,6 +81,26 @@ def run_smoke(
         )
         state["apply_complete"] = True
         write_json(directory / "run.json", state)
+
+    try:
+        print("Creating the temporary S3 bucket...", flush=True)
+        apply()
+        bucket = terraform(
+            commands, "output", "-raw", "bucket", timeout=deadline - time.monotonic()
+        ).stdout.strip()
+        state["bucket"] = bucket
+        write_json(directory / "run.json", state)
+        variables["job"] = transfer.prepare(
+            bucket, directory / "train.parquet", run_id, math.ceil(timeout_minutes * 60) + 300
+        )
+        variables["launch"] = True
+        write_json(infrastructure / "run.auto.tfvars.json", variables)
+        print(
+            f"Launching the image on the cheapest matching GPU from {', '.join(gpu_names)}, "
+            f"at most ${max_hourly_price:.2f}/hour...",
+            flush=True,
+        )
+        apply()
         instance = json.loads(
             terraform(
                 commands, "output", "-json", "instance", timeout=deadline - time.monotonic()
@@ -118,50 +117,12 @@ def run_smoke(
             or not 0 <= price <= max_hourly_price
         ):
             raise RunError("The provisioned instance exceeds the requested hourly price limit.")
-        host, port = connection(instance)
-        ssh = ssh_arguments(directory, host, port)
-        while time.monotonic() < deadline:
-            result = commands.run(
-                [*ssh, "true"], timeout=min(15, deadline - time.monotonic()), check=False
-            )
-            if result.returncode == 0:
-                break
-            time.sleep(min(5, max(0, deadline - time.monotonic())))
-        else:
-            raise RunError("SSH did not become ready within the rental time limit.")
-
-        remote_directory = f"/tmp/qwen-cuda-{run_id}"
-        commands.run(
-            [*ssh, f"umask 077; mkdir -p {shlex.quote(remote_directory)}"],
-            timeout=deadline - time.monotonic(),
-        )
-        copy = ssh_arguments(directory, host, port, copy=True)
-        print("Uploading the image and one training row...", flush=True)
-        commands.run(
-            [
-                *copy,
-                str(directory / "image.tar"),
-                str(directory / "compose.yaml"),
-                str(directory / "train.parquet"),
-                f"root@{host}:{remote_directory}/",
-            ],
-            timeout=deadline - time.monotonic(),
-        )
-        print("Running the CUDA smoke test...", flush=True)
-        commands.run(
-            [*ssh, "bash -s"],
-            stdin=remote_script(remote_directory, tag, image_id),
-            timeout=deadline - time.monotonic(),
-        )
-        commands.run(
-            [*copy, f"root@{host}:{remote_directory}/artifacts/cuda-smoke.json", str(directory)],
-            timeout=deadline - time.monotonic(),
-        )
-        validate_report(directory / "cuda-smoke.json")
+        print("Waiting for the container's smoke-test result...", flush=True)
+        report = transfer.collect(bucket, directory, run_id, deadline)
         state["outcome"] = "passed"
     except BaseException:
         state["outcome"] = "failed"
         raise
     finally:
         cleanup(commands, state)
-    return directory / "cuda-smoke.json"
+    return report

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import shutil
 import subprocess
@@ -13,6 +14,7 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from botocore.exceptions import ClientError
 
 RUNNER_PATH = Path(__file__).parents[1] / "experiments/cuda/run_vast.py"
 SPEC = importlib.util.spec_from_file_location("cuda_run_vast", RUNNER_PATH)
@@ -21,9 +23,11 @@ runner = importlib.util.module_from_spec(SPEC)
 with pytest.MonkeyPatch.context() as imports:
     imports.syspath_prepend(str(RUNNER_PATH.parent))
     SPEC.loader.exec_module(runner)
-    from vast_runner import RunError, artifacts, remote
+    from vast_runner import RunError, artifacts
     from vast_runner import commands as command_tools
     from vast_runner import terraform as terraform_tools
+    from vast_runner.image import publish
+    from vast_runner.storage import Transfer
 
 
 def valid_report() -> dict:
@@ -82,8 +86,42 @@ def test_sample_rejects_unusable_training_input(tmp_path, rows, message):
     assert not destination.exists()
 
 
+class FakeStorage:
+    def __init__(self, cloud, failure=None):
+        self.cloud = cloud
+        self.failure = failure
+
+    def put_object(self, *, Bucket, Key, Body):
+        if self.failure == "upload":
+            raise RunError("upload failed")
+        self.cloud.setdefault("objects", {})[Key] = Body
+        self.cloud["uploaded"] = pq.read_table(io.BytesIO(Body)).to_pylist()
+
+    def generate_presigned_url(self, operation, *, Params, ExpiresIn):
+        return f"https://example.invalid/{Params['Key']}?operation={operation}&expires={ExpiresIn}"
+
+    def get_object(self, *, Bucket, Key):
+        if self.failure == "download":
+            raise RunError("download failed")
+        if self.failure == "timeout":
+            raise RunError("transfer timed out")
+        if self.failure == "interrupt":
+            raise KeyboardInterrupt
+        try:
+            return {"Body": io.BytesIO(self.cloud["objects"][Key])}
+        except KeyError:
+            raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject") from None
+
+
+def fake_transfer(cloud, failure=None):
+    transfer = Transfer.__new__(Transfer)
+    transfer.region = "eu-west-2"
+    transfer.client = FakeStorage(cloud, failure)
+    return transfer
+
+
 class FakeTools:
-    """Stateful Terraform, Docker, and SSH boundaries with real temporary files."""
+    """Stateful cloud boundaries; production code writes inputs and collects results."""
 
     def __init__(self, directory, cloud, failure=None):
         self.directory = directory
@@ -93,15 +131,14 @@ class FakeTools:
     def run(self, arguments, **options):
         command = arguments[0]
         output = ""
-        if command == "ssh-keygen":
-            (self.directory / "id_ed25519.pub").write_text("ssh-ed25519 fixture-public-key")
-        elif command == "docker":
-            if arguments[1] == "build" and self.failure == "build":
-                raise RunError("build failed")
+        if command == "docker":
+            if arguments[1] in {"build", "push"} and self.failure == arguments[1]:
+                raise RunError(f"{self.failure} failed")
             if arguments[1:3] == ["image", "inspect"]:
-                output = "sha256:" + "a" * 64
-            if arguments[1] == "save":
-                Path(arguments[3]).write_bytes(b"image fixture")
+                repository = arguments[-1].rsplit(":", 1)[0]
+                output = json.dumps([repository + "@sha256:" + "a" * 64])
+                if self.failure == "digest":
+                    output = "[]"
         elif command == "terraform" and len(arguments) > 2:
             operation = arguments[2]
             infrastructure = self.directory / "terraform"
@@ -110,69 +147,64 @@ class FakeTools:
             if operation == "apply":
                 variables_path = Path(
                     next(
-                        argument.removeprefix("-var-file=")
-                        for argument in arguments
-                        if argument.startswith("-var-file=")
+                        arg.removeprefix("-var-file=")
+                        for arg in arguments
+                        if arg.startswith("-var-file=")
                     )
                 )
                 variables = json.loads(variables_path.read_text())
-                assert variables["run_label"] == "qwen-cuda-" + self.directory.name
-                assert variables["max_hourly_price"] == 0.5
-                assert "api_key" not in variables
-                self.cloud["resources"].add("ssh-key")
-                self.cloud["tracked"].add("ssh-key")
-                if self.failure != "no-offers":
-                    self.cloud["resources"].add("vm")
-                    self.cloud["rentals"] += 1
-                    if self.failure != "untracked-create":
-                        self.cloud["tracked"].add("vm")
+                self.cloud["resources"].add("bucket")
+                self.cloud["tracked"].add("bucket")
+                if variables["launch"]:
+                    if self.failure != "no-offers":
+                        self.cloud["resources"].add("container")
+                        self.cloud["rentals"] += 1
+                        if self.failure != "untracked-create":
+                            self.cloud["tracked"].add("container")
+                    report = valid_report()
+                    if self.failure == "report":
+                        report["cuda_tensor_checksum"] = 0
+                    result = {
+                        "run_id": variables["job"]["run_id"],
+                        "outcome": "failed" if self.failure == "smoke" else "passed",
+                        "report": report,
+                        "log": "CUDA subprocess output",
+                    }
+                    self.cloud["objects"]["result.json"] = json.dumps(result).encode()
                 (infrastructure / "terraform.tfstate").write_text(
                     json.dumps({"resources": sorted(self.cloud["tracked"])})
                 )
-                if self.failure in {"apply", "no-offers", "untracked-create"}:
+                if self.failure == "storage-apply" or (
+                    variables["launch"]
+                    and self.failure in {"apply", "no-offers", "untracked-create"}
+                ):
                     raise RunError("apply failed")
             elif operation == "output":
-                if self.failure == "output":
-                    raise RunError("output failed")
-                output = json.dumps(
-                    {
-                        "id": 123,
-                        "ssh_host": "gpu.example.test",
-                        "ssh_port": 2201,
-                        "hourly_price": 0.75 if self.failure == "price" else 0.30,
-                    }
-                )
+                if arguments[-1] == "bucket":
+                    output = ("qwen-cuda-" + self.directory.name).lower()
+                else:
+                    if self.failure == "output":
+                        raise RunError("output failed")
+                    output = json.dumps(
+                        {
+                            "id": 123,
+                            "hourly_price": 0.75 if self.failure == "price" else 0.30,
+                        }
+                    )
             elif operation == "destroy":
                 if self.failure == "destroy":
                     raise RunError("destroy failed")
                 if self.failure != "retained-state":
                     self.cloud["resources"].difference_update(self.cloud["tracked"])
                     self.cloud["tracked"].clear()
+                    self.cloud["objects"] = {}
                 (infrastructure / "terraform.tfstate").write_text(
                     json.dumps({"resources": sorted(self.cloud["tracked"])})
                 )
             elif operation == "state":
                 output = "\n".join(sorted(self.cloud["tracked"]))
-        elif command == "scp" and len(arguments) > 1:
-            downloading = arguments[-2].endswith("/artifacts/cuda-smoke.json")
-            if downloading:
-                if self.failure == "download":
-                    raise RunError("download failed")
-                report = valid_report()
-                if self.failure == "report":
-                    report["cuda_tensor_checksum"] = 0
-                (self.directory / "cuda-smoke.json").write_text(json.dumps(report))
-            else:
-                if self.failure == "upload":
-                    raise RunError("upload failed")
-                if self.failure == "timeout":
-                    raise subprocess.TimeoutExpired(arguments, 1)
-                self.cloud["uploaded"] = pq.read_table(self.directory / "train.parquet").to_pylist()
-        elif command == "ssh" and arguments[-1] == "bash -s":
-            if self.failure == "smoke":
-                raise RunError("GPU test failed")
-            if self.failure == "interrupt":
-                raise KeyboardInterrupt
+        else:
+            assert command not in {"ssh", "scp", "ssh-keygen"}
         return subprocess.CompletedProcess(arguments, 0, output, "")
 
 
@@ -187,6 +219,7 @@ def invoke_fake(tmp_path, training_file, failure=None):
             timeout_minutes=60,
             runs_directory=tmp_path / "runs",
             commands_type=lambda directory: FakeTools(directory, cloud, failure),
+            transfer_type=lambda region: fake_transfer(cloud, failure),
         )
 
     return invoke, cloud
@@ -196,12 +229,16 @@ def saved_run(tmp_path):
     return json.loads(next((tmp_path / "runs").glob("*/run.json")).read_text())
 
 
-def test_success_retains_valid_report_and_destroys_vm_and_temporary_key(tmp_path, training_file):
+def test_success_retains_report_and_log_and_destroys_container_bucket_and_objects(
+    tmp_path, training_file
+):
     invoke, cloud = invoke_fake(tmp_path, training_file)
     report_path = invoke()
     assert json.loads(report_path.read_text()) == valid_report()
     assert cloud["resources"] == set()
     assert cloud["rentals"] == 1
+    assert cloud["objects"] == {}
+    assert (report_path.parent / "smoke.log").read_text() == "CUDA subprocess output"
     assert cloud["uploaded"] == [{"id": "a", "subject": "Add fixture", "diff": "+first"}]
     state = saved_run(tmp_path)
     assert state["outcome"] == "passed"
@@ -210,17 +247,25 @@ def test_success_retains_valid_report_and_destroys_vm_and_temporary_key(tmp_path
     infrastructure = report_path.parent / "terraform"
     assert not list(infrastructure.glob("*.tf"))
     assert not (infrastructure / ".terraform.lock.hcl").exists()
+    variables = json.loads((infrastructure / "run.auto.tfvars.json").read_text())
+    assert (
+        variables["image"]
+        == state["image"]
+        == ("ghcr.io/thomasssb1/qwen-commit-cuda@sha256:" + "a" * 64)
+    )
+    assert variables["launch"] is True
+    assert not (report_path.parent / "image.tar").exists()
+    assert not (report_path.parent / "id_ed25519").exists()
 
 
 @pytest.mark.parametrize(
     "failure, error",
     [
         ("output", RunError),
-        ("upload", RunError),
         ("smoke", RunError),
         ("download", RunError),
         ("report", RunError),
-        ("timeout", subprocess.TimeoutExpired),
+        ("timeout", RunError),
         ("interrupt", KeyboardInterrupt),
     ],
 )
@@ -234,16 +279,19 @@ def test_failure_after_rental_still_destroys_resources(tmp_path, training_file, 
     assert saved_run(tmp_path)["outcome"] == "failed"
 
 
-def test_local_build_failure_does_not_rent_a_vm(tmp_path, training_file):
-    invoke, cloud = invoke_fake(tmp_path, training_file, "build")
-    with pytest.raises(RunError, match="build failed"):
+@pytest.mark.parametrize("failure", ["build", "push", "digest"])
+def test_image_publication_failure_does_not_create_cloud_resources(
+    tmp_path, training_file, failure
+):
+    invoke, cloud = invoke_fake(tmp_path, training_file, failure)
+    with pytest.raises(RunError):
         invoke()
     assert cloud["rentals"] == 0
     assert cloud["resources"] == set()
     assert saved_run(tmp_path)["cleanup"] == "not-needed"
 
 
-def test_terraform_initialization_failure_does_not_rent_a_vm(tmp_path, training_file):
+def test_terraform_initialization_failure_does_not_create_cloud_resources(tmp_path, training_file):
     invoke, cloud = invoke_fake(tmp_path, training_file, "init")
     with pytest.raises(RunError, match="init failed"):
         invoke()
@@ -257,7 +305,8 @@ def test_terraform_initialization_failure_does_not_rent_a_vm(tmp_path, training_
     [
         ("apply", 1, set()),
         ("no-offers", 0, set()),
-        ("untracked-create", 1, {"vm"}),
+        ("untracked-create", 1, {"container"}),
+        ("storage-apply", 0, set()),
     ],
 )
 def test_incomplete_apply_destroys_tracked_resources_and_requires_console_check(
@@ -279,16 +328,16 @@ def test_destroy_cannot_succeed_while_terraform_still_tracks_resources(tmp_path,
     invoke, cloud = invoke_fake(tmp_path, training_file, "retained-state")
     with pytest.raises(RunError, match="still tracks resources"):
         invoke()
-    assert cloud["resources"] == {"vm", "ssh-key"}
+    assert cloud["resources"] == {"container", "bucket"}
     assert saved_run(tmp_path)["cleanup"] == "failed"
 
 
-def test_excessive_actual_price_destroys_vm_before_upload(tmp_path, training_file):
+def test_excessive_actual_price_destroys_container_and_bucket(tmp_path, training_file):
     invoke, cloud = invoke_fake(tmp_path, training_file, "price")
     with pytest.raises(RunError, match="hourly price limit"):
         invoke()
     assert cloud["resources"] == set()
-    assert cloud["uploaded"] == []
+    assert cloud["objects"] == {}
 
 
 def test_cleanup_failure_preserves_report_and_reports_recovery_command(
@@ -297,7 +346,7 @@ def test_cleanup_failure_preserves_report_and_reports_recovery_command(
     invoke, cloud = invoke_fake(tmp_path, training_file, "destroy")
     with pytest.raises(RunError, match="destroy failed"):
         invoke()
-    assert cloud["resources"] == {"vm", "ssh-key"}
+    assert cloud["resources"] == {"container", "bucket"}
     assert saved_run(tmp_path)["cleanup"] == "failed"
     assert saved_run(tmp_path)["outcome"] == "passed"
     assert next((tmp_path / "runs").glob("*/cuda-smoke.json")).exists()
@@ -343,7 +392,7 @@ def test_cleanup_refuses_missing_recovery_files(
     )
     assert runner.main(["--cleanup", str(directory)]) == 1
     assert "recovery files are missing" in capsys.readouterr().err
-    assert cloud["resources"] == {"vm", "ssh-key"}
+    assert cloud["resources"] == {"container", "bucket"}
     assert saved_run(tmp_path)["cleanup"] == "failed"
 
 
@@ -403,6 +452,7 @@ def test_cli_saves_gpu_allowlist_in_terraform_inputs(
             runner.run_smoke,
             runs_directory=tmp_path / "runs",
             commands_type=lambda directory: FakeTools(directory, cloud),
+            transfer_type=lambda region: fake_transfer(cloud),
         ),
     )
     assert runner.main(["--dataset", str(training_file), *arguments]) == 0
@@ -441,12 +491,6 @@ def test_report_requires_cuda_batch_and_checksum_evidence(tmp_path, change):
     path.write_text(json.dumps(valid_report() | change))
     with pytest.raises(RunError, match="does not prove"):
         artifacts.validate_report(path)
-
-
-@pytest.mark.parametrize("host,port", [("-oProxyCommand=bad", 22), ("host;bad", 22), ("host", 0)])
-def test_invalid_connection_details_are_rejected(host, port):
-    with pytest.raises(RunError, match="SSH connection"):
-        remote.connection({"ssh_host": host, "ssh_port": port})
 
 
 def test_entry_point_help_works_from_another_directory(tmp_path, monkeypatch):
@@ -519,15 +563,6 @@ def test_command_logs_survive_a_later_cleanup_session(tmp_path):
     }
 
 
-@pytest.mark.skipif(shutil.which("ssh-keygen") is None, reason="OpenSSH is not installed")
-def test_command_can_generate_an_unencrypted_ephemeral_key(tmp_path):
-    commands = command_tools.Commands(tmp_path)
-    key_path = tmp_path / "id_ed25519"
-    commands.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key_path)])
-    assert key_path.is_file()
-    assert key_path.with_suffix(".pub").read_text().startswith("ssh-ed25519 ")
-
-
 def test_command_failure_retains_diagnostics(tmp_path):
     commands = command_tools.Commands(tmp_path)
     with pytest.raises(RunError, match="failed; see"):
@@ -544,19 +579,21 @@ def test_command_timeout_returns_control_for_cleanup(tmp_path):
 def test_api_credentials_are_not_inherited_by_subprocesses(tmp_path, monkeypatch):
     monkeypatch.setenv("VAST_API_KEY", "test-primary-key")
     monkeypatch.setenv("VASTAI_API_KEY", "test-legacy-key")
+    monkeypatch.setenv("VAST_IMAGE_LOGIN", "test-registry-login")
     result = command_tools.Commands(tmp_path).run(
         [
             sys.executable,
             "-c",
-            "import os; print(os.environ.get('VAST_API_KEY'), os.environ.get('VASTAI_API_KEY'))",
+            "import os; print(os.environ.get('VAST_API_KEY'), os.environ.get('VASTAI_API_KEY'), os.environ.get('VAST_IMAGE_LOGIN'))",
         ]
     )
-    assert result.stdout.strip() == "None None"
+    assert result.stdout.strip() == "None None None"
 
 
 def test_terraform_receives_api_key_through_environment_only(tmp_path, monkeypatch):
     monkeypatch.setenv("VAST_API_KEY", "test-primary-key")
     monkeypatch.setenv("VASTAI_API_KEY", "test-legacy-key")
+    monkeypatch.setenv("VAST_IMAGE_LOGIN", "test-registry-login")
     start_process = subprocess.Popen
 
     def terraform_probe(arguments, **options):
@@ -565,11 +602,31 @@ def test_terraform_receives_api_key_through_environment_only(tmp_path, monkeypat
             [
                 sys.executable,
                 "-c",
-                "import os; print(os.environ.get('VAST_API_KEY'), os.environ.get('VASTAI_API_KEY'), os.environ.get('TF_INPUT'))",
+                "import os; print(os.environ.get('VAST_API_KEY'), os.environ.get('VASTAI_API_KEY'), os.environ.get('TF_INPUT'), os.environ.get('TF_VAR_image_login'))",
             ],
             **options,
         )
 
     monkeypatch.setattr(command_tools.subprocess, "Popen", terraform_probe)
     result = command_tools.Commands(tmp_path).run(["terraform", "version"])
-    assert result.stdout.strip() == "None test-primary-key 0"
+    assert result.stdout.strip() == "None test-primary-key 0 test-registry-login"
+
+
+def test_sample_upload_failure_cleans_bucket_without_renting_gpu(tmp_path, training_file):
+    invoke, cloud = invoke_fake(tmp_path, training_file, "upload")
+    with pytest.raises(RunError, match="upload failed"):
+        invoke()
+    assert cloud["rentals"] == 0
+    assert cloud["resources"] == set()
+    assert saved_run(tmp_path)["cleanup"] == "complete"
+
+
+@pytest.mark.parametrize(
+    "repository",
+    ["local-image", "ghcr.io/owner/image:tag", "ghcr.io/owner/image@sha256:abc", "-option"],
+)
+def test_image_publication_rejects_repositories_with_no_registry_or_with_a_tag(
+    tmp_path, repository
+):
+    with pytest.raises(RunError, match="registry hostname and no tag or digest"):
+        publish(FakeTools(tmp_path, {}), repository, "run-id")

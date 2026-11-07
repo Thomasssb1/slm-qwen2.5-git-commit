@@ -11,6 +11,7 @@ requires-python = ">=3.12,<3.13"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 dependencies = [
+    "boto3>=1.40,<2",
     "pyarrow>=18,<24",
     "typer>=0.16,<1",
     "whats-that-code>=0.3.1,<0.4",

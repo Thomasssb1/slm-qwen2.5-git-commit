@@ -4,6 +4,10 @@ terraform {
   backend "local" {}
 
   required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "6.72.0"
+    }
     vastai = {
       source  = "berops/vastai"
       version = "0.1.1"
@@ -15,19 +19,25 @@ provider "vastai" {
   api_url = "https://console.vast.ai"
 }
 
-resource "vastai_ssh_key" "run" {
-  public_key = var.ssh_public_key
-}
-
 resource "vastai_instance" "smoke" {
-  depends_on = [vastai_ssh_key.run]
+  count      = var.launch ? 1 : 0
+  depends_on = [aws_s3_bucket_public_access_block.transfer]
 
   label          = var.run_label
-  image          = "docker.io/vastai/kvm:ubuntu_terminal"
-  vm             = true
-  runtype        = "ssh"
+  image          = var.image
+  image_login    = var.image_login
+  vm             = false
+  runtype        = "args"
+  args           = ["/opt/qwen-commit/run_remote.py", jsonencode(var.job)]
   cancel_unavail = true
   disk           = 80
+
+  lifecycle {
+    precondition {
+      condition     = var.job != null
+      error_message = "Upload the sample and provide the transfer job before launching."
+    }
+  }
 
   search_offer {
     type              = "ondemand"
@@ -41,7 +51,6 @@ resource "vastai_instance" "smoke" {
     duration          = { gte = var.rental_seconds + 300 }
     reliability       = { gte = 0.98 }
     verified          = { eq = true }
-    vms_enabled       = { eq = true }
     inet_down         = { gte = 100 }
     inet_down_cost    = { lte = 0.01 }
     inet_up_cost      = { lte = 0.01 }
@@ -51,11 +60,9 @@ resource "vastai_instance" "smoke" {
 }
 
 output "instance" {
-  value = {
-    id           = vastai_instance.smoke.id
-    ssh_host     = vastai_instance.smoke.ssh_host
-    ssh_port     = vastai_instance.smoke.ssh_port
-    hourly_price = vastai_instance.smoke.dph_total
-    gpu_name     = vastai_instance.smoke.gpu_name
-  }
+  value = var.launch ? {
+    id           = vastai_instance.smoke[0].id
+    hourly_price = vastai_instance.smoke[0].dph_total
+    gpu_name     = vastai_instance.smoke[0].gpu_name
+  } : null
 }
