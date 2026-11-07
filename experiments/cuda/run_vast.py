@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 
 from vast_runner import RunError
-from vast_runner.artifacts import PROJECT_DIRECTORY, RUNS_DIRECTORY
+from vast_runner.artifacts import PROJECT_DIRECTORY
 from vast_runner.terraform import recover
 from vast_runner.workflow import run_smoke
 
@@ -31,7 +30,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--max-hourly-price", type=float, default=0.50)
     parser.add_argument("--timeout-minutes", type=float, default=60)
-    parser.add_argument("--dry-run", action="store_true", help="Describe the run without renting.")
     parser.add_argument(
         "--cleanup", type=Path, help="Retry teardown for an existing run directory."
     )
@@ -42,36 +40,9 @@ def main(argv: list[str] | None = None) -> int:
     gpu_names = list(dict.fromkeys(name.strip() for name in gpu_names))
     if not 0 < arguments.max_hourly_price <= 10 or not 0 < arguments.timeout_minutes <= 120:
         parser.error("Use a positive hourly limit <= $10 and a time limit <= 120 minutes.")
-    if arguments.dry_run:
-        print(
-            json.dumps(
-                {
-                    "dataset": str(arguments.dataset.resolve()),
-                    "gpu_names": gpu_names,
-                    "max_hourly_price_usd": arguments.max_hourly_price,
-                    "rental_timeout_minutes": arguments.timeout_minutes,
-                    "steps": [
-                        "build locally",
-                        "terraform apply",
-                        "upload",
-                        "smoke",
-                        "download",
-                        "terraform destroy",
-                    ],
-                    "uploads": [
-                        "Docker image",
-                        "Compose configuration",
-                        "one training row: id/subject/diff",
-                    ],
-                    "artifacts": str(RUNS_DIRECTORY),
-                },
-                indent=2,
-            )
-        )
-        return 0
     api_key = os.environ.get("VAST_API_KEY") or os.environ.get("VASTAI_API_KEY")
     if not api_key:
-        parser.error("Set VAST_API_KEY to a personal Vast API key before running.")
+        parser.error("Set VAST_API_KEY before running.")
     try:
         if arguments.cleanup:
             recover(arguments.cleanup)

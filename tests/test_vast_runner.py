@@ -412,7 +412,7 @@ def test_cli_requires_credentials_before_starting_a_run(monkeypatch, capsys):
     with pytest.raises(SystemExit) as error:
         runner.main([])
     assert error.value.code == 2
-    assert "Set VAST_API_KEY" in capsys.readouterr().err
+    assert capsys.readouterr().err.rstrip().endswith("error: Set VAST_API_KEY before running.")
 
 
 @pytest.mark.parametrize(
@@ -441,46 +441,19 @@ def test_invalid_connection_details_are_rejected(host, port):
         remote.connection({"ssh_host": host, "ssh_port": port})
 
 
-def test_dry_run_works_without_credentials_and_describes_lifecycle(monkeypatch, capsys):
-    monkeypatch.delenv("VAST_API_KEY", raising=False)
-    monkeypatch.delenv("VASTAI_API_KEY", raising=False)
-    assert runner.main(["--dry-run"]) == 0
-    plan = json.loads(capsys.readouterr().out)
-    assert plan["steps"][0] == "build locally"
-    assert plan["steps"][-1] == "terraform destroy"
-    assert plan["max_hourly_price_usd"] == 0.50
-    assert plan["gpu_names"] == ["RTX 3090", "RTX PRO 4000"]
-
-
-def test_dry_run_reports_custom_gpu_allowlist(capsys):
-    assert runner.main(["--dry-run", "--gpu", "RTX PRO 4000", "--gpu", "RTX 4090"]) == 0
-    plan = json.loads(capsys.readouterr().out)
-    assert plan["gpu_names"] == ["RTX PRO 4000", "RTX 4090"]
-
-
-def test_entry_point_dry_run_resolves_project_paths_from_another_directory(tmp_path, monkeypatch):
+def test_entry_point_help_works_from_another_directory(tmp_path, monkeypatch):
     for name in ("VAST_API_KEY", "VASTAI_API_KEY", "PYTHONPATH"):
         monkeypatch.delenv(name, raising=False)
     result = subprocess.run(
-        [sys.executable, str(RUNNER_PATH), "--dry-run"],
+        [sys.executable, str(RUNNER_PATH), "--help"],
         cwd=tmp_path,
         capture_output=True,
         text=True,
         timeout=30,
         check=True,
     )
-    plan = json.loads(result.stdout)
-    assert Path(plan["dataset"]) == RUNNER_PATH.parents[2] / "notebooks/prepared/train.parquet"
-    assert Path(plan["artifacts"]) == RUNNER_PATH.parent / "artifacts/vast"
-    assert plan["gpu_names"] == ["RTX 3090", "RTX PRO 4000"]
-    assert plan["steps"] == [
-        "build locally",
-        "terraform apply",
-        "upload",
-        "smoke",
-        "download",
-        "terraform destroy",
-    ]
+    assert "--gpu NAME" in result.stdout
+    assert "--cleanup" in result.stdout
 
 
 def test_command_logs_survive_a_later_cleanup_session(tmp_path):

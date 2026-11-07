@@ -19,7 +19,6 @@ saved privately under `experiments/cuda/artifacts/vast/`.
 Defaults to the cheapest matching RTX 3090 or RTX PRO 4000, up to $0.50/hour
 including storage, with a 60-minute execution timeout.
 
-- `--dry-run`: preview settings without renting.
 - `--gpu NAME`: replace the default GPU allowlist; repeat for multiple models.
 - `--max-hourly-price USD`: set the maximum hourly price, including storage.
 - `--timeout-minutes N`: set the rental execution timeout.
