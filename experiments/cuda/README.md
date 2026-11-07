@@ -7,8 +7,8 @@ This is the isolated NVIDIA CUDA environment for the base-model, SFT, and DPO wo
 Requires a funded Vast account, Terraform < 2.0, AWS credentials with S3 access,
 and `notebooks/prepared/train.parquet`. Set VAST_API_KEY before running.
 Log Docker into GHCR with permission to push to `ghcr.io/thomasssb1/qwen-commit-cuda`.
-For a private image, set `VAST_IMAGE_LOGIN` to `-u USER -p READ_TOKEN ghcr.io`
-so Vast can pull it.
+Set `VAST_IMAGE_LOGIN` to `-u USER -p READ_TOKEN ghcr.io` so Vast can pull the
+private image.
 Run from the repository root:
 
 ```console
