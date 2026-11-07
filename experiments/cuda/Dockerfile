@@ -28,6 +28,7 @@ RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin experiment \
     && install --directory --owner=experiment --group=experiment /artifacts /datasets /workspace
 
 COPY smoke_test.py /opt/qwen-commit/smoke_test.py
+COPY run_remote.py /opt/qwen-commit/run_remote.py
 USER experiment
 WORKDIR /workspace
 
