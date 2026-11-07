@@ -54,8 +54,6 @@ def run_smoke(
     )
     infrastructure = directory / "terraform"
     infrastructure.mkdir()
-    for name in ("main.tf", "variables.tf", ".terraform.lock.hcl"):
-        shutil.copy2(CUDA_DIRECTORY / "vast" / name, infrastructure / name)
     write_json(
         infrastructure / "run.auto.tfvars.json",
         {

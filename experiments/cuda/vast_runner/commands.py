@@ -38,7 +38,12 @@ class Commands:
             raise RunError("The rental time limit expired.")
         environment = self.environment.copy()
         if Path(arguments[0]).stem == "terraform":
-            environment.update(TF_IN_AUTOMATION="1", TF_INPUT="0")
+            environment.update(
+                TF_IN_AUTOMATION="1",
+                TF_INPUT="0",
+                TF_DATA_DIR=str(self.directory / "terraform" / ".terraform"),
+                TF_WORKSPACE="default",
+            )
             if self.api_key:
                 environment["VASTAI_API_KEY"] = self.api_key
         with log_path.open("w", encoding="utf-8") as log:

@@ -23,6 +23,7 @@ with pytest.MonkeyPatch.context() as imports:
     SPEC.loader.exec_module(runner)
     from vast_runner import RunError, artifacts, remote
     from vast_runner import commands as command_tools
+    from vast_runner import terraform as terraform_tools
 
 
 def valid_report() -> dict:
@@ -107,7 +108,14 @@ class FakeTools:
             if operation == "init" and self.failure == "init":
                 raise RunError("init failed")
             if operation == "apply":
-                variables = json.loads((infrastructure / "run.auto.tfvars.json").read_text())
+                variables_path = Path(
+                    next(
+                        argument.removeprefix("-var-file=")
+                        for argument in arguments
+                        if argument.startswith("-var-file=")
+                    )
+                )
+                variables = json.loads(variables_path.read_text())
                 assert variables["run_label"] == "qwen-cuda-" + self.directory.name
                 assert variables["max_hourly_price"] == 0.5
                 assert "api_key" not in variables
@@ -199,6 +207,9 @@ def test_success_retains_valid_report_and_destroys_vm_and_temporary_key(tmp_path
     assert state["outcome"] == "passed"
     assert state["cleanup"] == "complete"
     assert state["instance"]["id"] == 123
+    infrastructure = report_path.parent / "terraform"
+    assert not list(infrastructure.glob("*.tf"))
+    assert not (infrastructure / ".terraform.lock.hcl").exists()
 
 
 @pytest.mark.parametrize(
@@ -315,10 +326,7 @@ def test_cleanup_command_retries_failed_destroy_and_keeps_report(
     assert cloud["resources"] == set()
 
 
-@pytest.mark.parametrize(
-    "missing",
-    ["terraform.tfstate", "main.tf", "variables.tf", ".terraform.lock.hcl", "run.auto.tfvars.json"],
-)
+@pytest.mark.parametrize("missing", ["terraform.tfstate", "run.auto.tfvars.json"])
 def test_cleanup_refuses_missing_recovery_files(
     tmp_path, training_file, monkeypatch, capsys, missing
 ):
@@ -454,6 +462,49 @@ def test_entry_point_help_works_from_another_directory(tmp_path, monkeypatch):
     )
     assert "--gpu NAME" in result.stdout
     assert "--cleanup" in result.stdout
+
+
+@pytest.mark.skipif(shutil.which("terraform") is None, reason="Terraform is not installed")
+def test_shared_configuration_keeps_run_states_separate_during_cleanup(tmp_path, monkeypatch):
+    configuration = tmp_path / "shared configuration"
+    configuration.mkdir()
+    (configuration / "main.tf").write_text(
+        """terraform {
+  backend "local" {}
+}
+variable "label" { type = string }
+resource "terraform_data" "run" { input = var.label }
+output "label" { value = terraform_data.run.output }
+"""
+    )
+    monkeypatch.setattr(terraform_tools, "TERRAFORM_DIRECTORY", configuration)
+    monkeypatch.setenv("TF_DATA_DIR", str(tmp_path / "unrelated-cache"))
+    monkeypatch.setenv("TF_WORKSPACE", "unrelated-workspace")
+    runs = []
+    for label in ("first", "second"):
+        directory = tmp_path / label
+        infrastructure = directory / "terraform"
+        infrastructure.mkdir(parents=True)
+        artifacts.write_json(infrastructure / "run.auto.tfvars.json", {"label": label})
+        commands = command_tools.Commands(directory)
+        terraform_tools.terraform(commands, "init", "-input=false", "-lockfile=readonly")
+        terraform_tools.terraform(commands, "apply", "-auto-approve", "-input=false")
+        runs.append(commands)
+        assert (infrastructure / "terraform.tfstate").is_file()
+        assert (infrastructure / ".terraform" / "terraform.tfstate").is_file()
+        assert terraform_tools.terraform(commands, "output", "-raw", "label").stdout == label
+
+    first, second = runs
+    second_state_path = second.directory / "terraform/terraform.tfstate"
+    second_state = second_state_path.read_bytes()
+    terraform_tools.cleanup(first, {"apply_complete": True})
+    assert terraform_tools.terraform(first, "state", "list").stdout.strip() == ""
+    assert second_state_path.read_bytes() == second_state
+    assert terraform_tools.terraform(second, "output", "-raw", "label").stdout == "second"
+    assert not (configuration / "terraform.tfstate").exists()
+    assert not (configuration / ".terraform").exists()
+    assert not (tmp_path / "unrelated-cache").exists()
+    terraform_tools.cleanup(second, {"apply_complete": True})
 
 
 def test_command_logs_survive_a_later_cleanup_session(tmp_path):

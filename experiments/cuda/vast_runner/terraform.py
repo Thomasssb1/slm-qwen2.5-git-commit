@@ -8,13 +8,24 @@ import sys
 from pathlib import Path
 
 from . import RunError
-from .artifacts import write_json
+from .artifacts import CUDA_DIRECTORY, write_json
 from .commands import Commands
+
+TERRAFORM_DIRECTORY = CUDA_DIRECTORY / "vast"
 
 
 def terraform(commands: Commands, operation: str, *arguments: str, **options):
+    infrastructure = commands.directory / "terraform"
+    run_arguments = []
+    if operation == "init":
+        run_arguments = [
+            "-reconfigure",
+            f"-backend-config=path={infrastructure / 'terraform.tfstate'}",
+        ]
+    elif operation in {"apply", "destroy"}:
+        run_arguments = [f"-var-file={infrastructure / 'run.auto.tfvars.json'}"]
     return commands.run(
-        ["terraform", f"-chdir={commands.directory / 'terraform'}", operation, *arguments],
+        ["terraform", f"-chdir={TERRAFORM_DIRECTORY}", operation, *run_arguments, *arguments],
         **options,
     )
 
@@ -62,14 +73,7 @@ def recover(directory: Path, *, commands_type=Commands) -> None:
         raise RunError("This directory is not a CUDA runner state directory.")
     infrastructure = directory / "terraform"
     if not all(
-        (infrastructure / name).is_file()
-        for name in (
-            "main.tf",
-            "variables.tf",
-            ".terraform.lock.hcl",
-            "run.auto.tfvars.json",
-            "terraform.tfstate",
-        )
+        (infrastructure / name).is_file() for name in ("run.auto.tfvars.json", "terraform.tfstate")
     ):
         raise RunError("Terraform recovery files are missing; check the run label in Vast.")
     commands = commands_type(directory)
