@@ -28,7 +28,7 @@ resource "vastai_instance" "smoke" {
   image_login    = var.image_login
   vm             = false
   runtype        = "args"
-  args           = ["/opt/qwen-commit/run_remote.py", jsonencode(var.job)]
+  args           = ["/opt/qwen-commit/startup.py", jsonencode(var.job)]
   cancel_unavail = true
   disk           = 80
 

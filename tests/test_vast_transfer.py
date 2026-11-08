@@ -23,7 +23,7 @@ with pytest.MonkeyPatch.context() as imports:
     imports.syspath_prepend(str(CUDA))
     from vast_runner import RunError, storage
 
-spec = importlib.util.spec_from_file_location("cuda_remote", CUDA / "run_remote.py")
+spec = importlib.util.spec_from_file_location("cuda_startup", CUDA / "startup.py")
 remote = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(remote)
 

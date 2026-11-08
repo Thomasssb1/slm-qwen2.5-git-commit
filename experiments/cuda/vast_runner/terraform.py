@@ -50,7 +50,7 @@ def cleanup(commands: Commands, state: dict) -> None:
         write_json(commands.directory / "run.json", state)
         print(
             "Cleanup was not confirmed; the rental may still be billing. Retry with:\n"
-            f'uv run python experiments/cuda/run_vast.py --cleanup "{commands.directory}"',
+            f'uv run python experiments/cuda/run.py --cleanup "{commands.directory}"',
             file=sys.stderr,
         )
         raise

@@ -16,8 +16,8 @@ import pyarrow.parquet as pq
 import pytest
 from botocore.exceptions import ClientError
 
-RUNNER_PATH = Path(__file__).parents[1] / "experiments/cuda/run_vast.py"
-SPEC = importlib.util.spec_from_file_location("cuda_run_vast", RUNNER_PATH)
+RUNNER_PATH = Path(__file__).parents[1] / "experiments/cuda/run.py"
+SPEC = importlib.util.spec_from_file_location("cuda_run", RUNNER_PATH)
 assert SPEC and SPEC.loader
 runner = importlib.util.module_from_spec(SPEC)
 with pytest.MonkeyPatch.context() as imports:

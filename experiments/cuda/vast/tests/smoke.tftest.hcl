@@ -151,7 +151,7 @@ run "storage_before_launch" {
 run "launch_uses_published_image_and_transfer_job" {
   command = plan
   assert {
-    condition     = vastai_instance.smoke[0].image == var.image && vastai_instance.smoke[0].args[0] == "/opt/qwen-commit/run_remote.py" && jsondecode(vastai_instance.smoke[0].args[1]) == var.job
+    condition     = vastai_instance.smoke[0].image == var.image && vastai_instance.smoke[0].args[0] == "/opt/qwen-commit/startup.py" && jsondecode(vastai_instance.smoke[0].args[1]) == var.job
     error_message = "Run the image wrapper with the scoped transfer job."
   }
 }

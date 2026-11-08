@@ -2,4 +2,4 @@
 !Dockerfile
 !requirements.txt
 !smoke_test.py
-!run_remote.py
+!startup.py

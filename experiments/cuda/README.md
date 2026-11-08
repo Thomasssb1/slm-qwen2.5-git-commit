@@ -12,7 +12,7 @@ private image.
 Run from the repository root:
 
 ```console
-uv run python experiments/cuda/run_vast.py
+uv run python experiments/cuda/run.py
 ```
 
 Builds and pushes the image, creates a temporary private S3 bucket, and launches
@@ -34,7 +34,7 @@ including storage, with a 60-minute execution timeout.
 Keep the run directory until cleanup succeeds. Retry failed teardown with:
 
 ```console
-uv run python experiments/cuda/run_vast.py --cleanup PATH_TO_RUN_DIRECTORY
+uv run python experiments/cuda/run.py --cleanup PATH_TO_RUN_DIRECTORY
 ```
 
 If provisioning was interrupted, check Vast and S3 for leftovers named
