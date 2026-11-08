@@ -139,6 +139,14 @@ run "storage_before_launch" {
     error_message = "Use a run-specific bucket and remove its transfer objects on teardown."
   }
   assert {
+    condition     = aws_s3_bucket_versioning.transfer.versioning_configuration[0].status == "Disabled"
+    error_message = "The temporary transfer bucket must remain unversioned."
+  }
+  assert {
+    condition     = one(aws_s3_bucket_lifecycle_configuration.transfer.rule).status == "Enabled" && one(aws_s3_bucket_lifecycle_configuration.transfer.rule).expiration[0].days == 7 && one(aws_s3_bucket_lifecycle_configuration.transfer.rule).filter[0].prefix == ""
+    error_message = "Expire all leftover transfer objects after seven days."
+  }
+  assert {
     condition     = aws_s3_bucket_public_access_block.transfer.block_public_acls && aws_s3_bucket_public_access_block.transfer.block_public_policy && aws_s3_bucket_public_access_block.transfer.ignore_public_acls && aws_s3_bucket_public_access_block.transfer.restrict_public_buckets
     error_message = "The transfer bucket must block all public access."
   }

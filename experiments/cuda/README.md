@@ -19,6 +19,7 @@ Builds and pushes the image, creates a temporary private S3 bucket, and launches
 the image directly on Vast. The container tests one training row using expiring
 transfer URLs. The runner saves `cuda-smoke.json` and `smoke.log`, then destroys
 the rental and bucket, including its objects. The registry image is retained.
+The bucket is unversioned; leftover objects expire after seven days.
 Artifacts and recovery state stay under `experiments/cuda/artifacts/vast/`.
 
 Defaults to the cheapest matching RTX 3090 or RTX PRO 4000, up to $0.50/hour

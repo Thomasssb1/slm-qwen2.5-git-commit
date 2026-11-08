@@ -8,6 +8,29 @@ resource "aws_s3_bucket" "transfer" {
   tags          = { Run = var.run_label }
 }
 
+resource "aws_s3_bucket_versioning" "transfer" {
+  bucket = aws_s3_bucket.transfer.id
+  versioning_configuration {
+    status = "Disabled"
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "transfer" {
+  bucket     = aws_s3_bucket.transfer.id
+  depends_on = [aws_s3_bucket_versioning.transfer]
+
+  rule {
+    id     = "expire-run-artifacts"
+    status = "Enabled"
+    filter {
+      prefix = ""
+    }
+    expiration {
+      days = 7
+    }
+  }
+}
+
 resource "aws_s3_bucket_public_access_block" "transfer" {
   bucket                  = aws_s3_bucket.transfer.id
   block_public_acls       = true
