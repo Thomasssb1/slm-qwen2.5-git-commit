@@ -30,14 +30,29 @@ def terraform(commands: Commands, operation: str, *arguments: str, **options):
     )
 
 
+def _save_cleanup_status(commands: Commands, state: dict, status: str) -> None:
+    state["cleanup"] = status
+    try:
+        write_json(commands.directory / "run.json", state)
+    except OSError as error:
+        print(f"Could not save cleanup status '{status}': {error}", file=sys.stderr)
+
+
 def cleanup(commands: Commands, state: dict) -> None:
-    """Destroy the resources recorded in this run's isolated Terraform state."""
-    state["cleanup"] = "pending"
-    write_json(commands.directory / "run.json", state)
+    """Destroy tracked resources even when cleanup bookkeeping cannot be saved."""
+    _save_cleanup_status(commands, state, "pending")
     print("Destroying the rental and its temporary S3 bucket...", flush=True)
     try:
-        terraform(commands, "destroy", "-auto-approve", "-input=false", "-no-color", timeout=900)
-        if terraform(commands, "state", "list").stdout.strip():
+        terraform(
+            commands,
+            "destroy",
+            "-auto-approve",
+            "-input=false",
+            "-no-color",
+            timeout=900,
+            best_effort_log=True,
+        )
+        if terraform(commands, "state", "list", best_effort_log=True).stdout.strip():
             raise RunError("Terraform still tracks resources after destroy.")
         if not state.get("apply_complete"):
             raise RunError(
@@ -46,16 +61,14 @@ def cleanup(commands: Commands, state: dict) -> None:
                 f"{state['label'].lower()} to find any untracked resources."
             )
     except BaseException:
-        state["cleanup"] = "failed"
-        write_json(commands.directory / "run.json", state)
+        _save_cleanup_status(commands, state, "failed")
         print(
             "Cleanup was not confirmed; the rental may still be billing. Retry with:\n"
             f'uv run python experiments/cuda/run.py --cleanup "{commands.directory}"',
             file=sys.stderr,
         )
         raise
-    state["cleanup"] = "complete"
-    write_json(commands.directory / "run.json", state)
+    _save_cleanup_status(commands, state, "complete")
 
 
 def recover(directory: Path, *, commands_type=Commands) -> None:
@@ -77,5 +90,13 @@ def recover(directory: Path, *, commands_type=Commands) -> None:
     ):
         raise RunError("Terraform recovery files are missing; check the run label in Vast.")
     commands = commands_type(directory)
-    terraform(commands, "init", "-input=false", "-no-color", "-lockfile=readonly", timeout=600)
+    terraform(
+        commands,
+        "init",
+        "-input=false",
+        "-no-color",
+        "-lockfile=readonly",
+        timeout=600,
+        best_effort_log=True,
+    )
     cleanup(commands, state)

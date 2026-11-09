@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import sys
+from contextlib import nullcontext
 from pathlib import Path
 
 from . import RunError
@@ -32,6 +34,7 @@ class Commands:
         timeout: float = 300,
         stdin: str | None = None,
         check: bool = True,
+        best_effort_log: bool = False,
     ) -> subprocess.CompletedProcess:
         self.sequence += 1
         log_path = self.directory / f"{self.sequence:02d}-{Path(arguments[0]).stem}.log"
@@ -49,14 +52,15 @@ class Commands:
                 environment["VASTAI_API_KEY"] = self.api_key
             if self.image_login:
                 environment["TF_VAR_image_login"] = self.image_login
-        with log_path.open("w", encoding="utf-8") as log:
+        # Teardown must start even if the artifacts directory cannot accept writes.
+        with nullcontext() if best_effort_log else log_path.open("w", encoding="utf-8") as log:
             # Give Terraform a chance to flush state before attempting cleanup.
             process = subprocess.Popen(
                 arguments,
                 cwd=self.directory,
                 env=environment,
                 stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
-                stdout=log,
+                stdout=subprocess.PIPE if best_effort_log else log,
                 stderr=subprocess.STDOUT,
                 text=True,
                 encoding="utf-8",
@@ -64,7 +68,7 @@ class Commands:
                 start_new_session=os.name != "nt",
             )
             try:
-                process.communicate(input=stdin, timeout=timeout)
+                output, _ = process.communicate(input=stdin, timeout=timeout)
             except (subprocess.TimeoutExpired, KeyboardInterrupt):
                 try:
                     if os.name == "nt":
@@ -80,7 +84,16 @@ class Commands:
                     process.kill()
                     process.wait()
                 raise
-        output = log_path.read_text(encoding="utf-8", errors="replace")
+        log_saved = True
+        if best_effort_log:
+            try:
+                log_path.write_text(output, encoding="utf-8")
+            except OSError as error:
+                log_saved = False
+                print(f"Could not save command log {log_path}: {error}", file=sys.stderr)
+        else:
+            output = log_path.read_text(encoding="utf-8", errors="replace")
         if check and process.returncode:
-            raise RunError(f"{Path(arguments[0]).name} failed; see {log_path}")
+            detail = f"see {log_path}" if log_saved else "command log could not be saved"
+            raise RunError(f"{Path(arguments[0]).name} failed; {detail}")
         return subprocess.CompletedProcess(arguments, process.returncode, output, "")

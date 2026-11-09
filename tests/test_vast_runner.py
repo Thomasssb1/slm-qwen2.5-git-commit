@@ -361,13 +361,35 @@ def test_cleanup_failure_preserves_report_and_reports_recovery_command(
     assert "--cleanup" in capsys.readouterr().err
 
 
+def test_cleanup_failure_is_not_masked_by_status_write_failure(
+    tmp_path, training_file, monkeypatch, capsys
+):
+    def cannot_save(*args):
+        raise OSError("status file is unwritable")
+
+    monkeypatch.setattr(terraform_tools, "write_json", cannot_save)
+    invoke, cloud = invoke_fake(tmp_path, training_file, "destroy")
+    with pytest.raises(RunError, match="destroy failed"):
+        invoke()
+
+    assert cloud["resources"] == {"container", "bucket"}
+    assert next((tmp_path / "runs").glob("*/cuda-smoke.json")).exists()
+    error = capsys.readouterr().err
+    assert "Could not save cleanup status 'pending'" in error
+    assert "Could not save cleanup status 'failed'" in error
+    assert '--cleanup "' in error
+
+
+@pytest.mark.parametrize("status_writable", [True, False])
 def test_cleanup_command_retries_failed_destroy_and_keeps_report(
-    tmp_path, training_file, monkeypatch
+    tmp_path, training_file, monkeypatch, capsys, status_writable
 ):
     invoke, cloud = invoke_fake(tmp_path, training_file, "destroy")
     with pytest.raises(RunError):
         invoke()
     directory = next((tmp_path / "runs").iterdir())
+    if not status_writable:
+        (directory / "run.tmp").mkdir()
     monkeypatch.setenv("VASTAI_API_KEY", "test-only-placeholder")
     monkeypatch.setattr(
         runner,
@@ -376,11 +398,13 @@ def test_cleanup_command_retries_failed_destroy_and_keeps_report(
     )
     assert runner.main(["--cleanup", str(directory)]) == 0
     assert cloud["resources"] == set()
-    assert saved_run(tmp_path)["cleanup"] == "complete"
+    assert saved_run(tmp_path)["cleanup"] == ("complete" if status_writable else "failed")
     assert json.loads((directory / "cuda-smoke.json").read_text()) == valid_report()
     # Recovery is idempotent after the resources have already gone.
     assert runner.main(["--cleanup", str(directory)]) == 0
     assert cloud["resources"] == set()
+    if not status_writable:
+        assert "Could not save cleanup status 'complete'" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("missing", ["terraform.tfstate", "run.auto.tfvars.json"])
@@ -546,7 +570,10 @@ def test_entry_point_help_works_from_another_directory(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(shutil.which("terraform") is None, reason="Terraform is not installed")
-def test_shared_configuration_keeps_run_states_separate_during_cleanup(tmp_path, monkeypatch):
+@pytest.mark.parametrize("artifacts_writable", [True, False])
+def test_shared_configuration_keeps_run_states_separate_during_cleanup(
+    tmp_path, monkeypatch, capsys, artifacts_writable
+):
     configuration = tmp_path / "shared configuration"
     configuration.mkdir()
     (configuration / "main.tf").write_text(
@@ -578,8 +605,20 @@ output "label" { value = terraform_data.run.output }
     first, second = runs
     second_state_path = second.directory / "terraform/terraform.tfstate"
     second_state = second_state_path.read_bytes()
-    terraform_tools.cleanup(first, {"apply_complete": True})
+    if not artifacts_writable:
+        # Real filesystem errors for both status writes and the two teardown logs.
+        (first.directory / "run.tmp").mkdir()
+        for sequence in (first.sequence + 1, first.sequence + 2):
+            (first.directory / f"{sequence:02d}-terraform.log").mkdir()
+    state = {"apply_complete": True}
+    terraform_tools.cleanup(first, state)
+    assert state["cleanup"] == "complete"
     assert terraform_tools.terraform(first, "state", "list").stdout.strip() == ""
+    if not artifacts_writable:
+        error = capsys.readouterr().err
+        assert "Could not save cleanup status 'pending'" in error
+        assert "Could not save cleanup status 'complete'" in error
+        assert error.count("Could not save command log") == 2
     assert second_state_path.read_bytes() == second_state
     assert terraform_tools.terraform(second, "output", "-raw", "label").stdout == "second"
     assert not (configuration / "terraform.tfstate").exists()
@@ -605,6 +644,22 @@ def test_command_failure_retains_diagnostics(tmp_path):
     with pytest.raises(RunError, match="failed; see"):
         commands.run([sys.executable, "-c", "print('failure details'); raise SystemExit(3)"])
     assert "failure details" in next(tmp_path.glob("*.log")).read_text()
+
+
+def test_command_failure_is_reported_when_cleanup_log_cannot_be_saved(tmp_path, capsys):
+    commands = command_tools.Commands(tmp_path)
+    (tmp_path / f"01-{Path(sys.executable).stem}.log").mkdir()
+    with pytest.raises(RunError, match="failed; command log could not be saved"):
+        commands.run(
+            [
+                sys.executable,
+                "-c",
+                "from pathlib import Path; Path('ran').touch(); raise SystemExit(3)",
+            ],
+            best_effort_log=True,
+        )
+    assert (tmp_path / "ran").exists()
+    assert "Could not save command log" in capsys.readouterr().err
 
 
 def test_command_timeout_returns_control_for_cleanup(tmp_path):
