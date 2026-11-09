@@ -1,0 +1,11 @@
+{
+  "scripts": [
+    {
+      "name": "Copy worktree environment",
+      "command": "uv run --no-project python -c \"from pathlib import Path; import shutil, subprocess; root = Path(subprocess.check_output(['git', 'rev-parse', '--path-format=absolute', '--git-common-dir'], text=True).strip()).parent; files = (root / '.worktreeinclude').read_text().splitlines(); [shutil.copy2(root / name, name) for name in map(str.strip, files) if name and not name.startswith('#') and not Path(name).exists()]\"",
+      "icon": "configure",
+      "runOnWorktreeCreate": true,
+      "async": false
+    }
+  ]
+}

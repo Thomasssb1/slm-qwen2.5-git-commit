@@ -8,6 +8,8 @@ Requires a funded Vast account, Terraform < 2.0, AWS credentials with S3 access,
 and `notebooks/prepared/train.parquet`. Copy `.env.example` to `.env` in the
 repository root and set `VAST_API_KEY`. The runner loads this gitignored file
 automatically; existing environment variables take precedence.
+Keep `.env` in the main checkout; `.worktreeinclude` lists it for worktree setup.
+In T3, import **Copy worktree environment** from `t3.json` under project Actions.
 Log Docker into GHCR using a token with `read:packages` and `write:packages`.
 Use that same token in `.env` for `VAST_IMAGE_LOGIN`: `-u USER -p TOKEN ghcr.io`, so Vast
 can pull the private image at `ghcr.io/thomasssb1/qwen-commit-cuda`.
