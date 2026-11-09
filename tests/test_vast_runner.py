@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -28,6 +29,13 @@ with pytest.MonkeyPatch.context() as imports:
     from vast_runner import terraform as terraform_tools
     from vast_runner.image import publish
     from vast_runner.storage import Transfer
+
+
+@pytest.fixture(autouse=True)
+def isolated_project_environment(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "PROJECT_DIRECTORY", tmp_path)
+    for name in ("VAST_API_KEY", "VASTAI_API_KEY", "VAST_IMAGE_LOGIN"):
+        monkeypatch.delenv(name, raising=False)
 
 
 def valid_report() -> dict:
@@ -471,6 +479,35 @@ def test_cli_requires_credentials_before_starting_a_run(monkeypatch, capsys):
         runner.main([])
     assert error.value.code == 2
     assert capsys.readouterr().err.rstrip().endswith("error: Set VAST_API_KEY before running.")
+
+
+@pytest.mark.parametrize("existing_key", [None, "shell-key"])
+def test_cli_loads_project_dotenv_without_overriding_shell_credentials(
+    tmp_path, monkeypatch, capsys, existing_key
+):
+    (tmp_path / ".env").write_text(
+        'VAST_API_KEY=file-key\nVAST_IMAGE_LOGIN="-u fixture -p registry-key ghcr.io"\n'
+    )
+    other_directory = tmp_path / "elsewhere"
+    other_directory.mkdir()
+    (other_directory / ".env").write_text("VAST_API_KEY=wrong-directory-key\n")
+    monkeypatch.chdir(other_directory)
+    if existing_key:
+        monkeypatch.setenv("VAST_API_KEY", existing_key)
+
+    with pytest.raises(SystemExit) as result:
+        runner.main(["--help"])
+
+    assert result.value.code == 0
+    assert os.environ["VAST_API_KEY"] == (existing_key or "file-key")
+    commands = command_tools.Commands(tmp_path)
+    assert commands.api_key == (existing_key or "file-key")
+    assert commands.image_login == "-u fixture -p registry-key ghcr.io"
+    assert "VAST_API_KEY" not in commands.environment
+    assert "VAST_IMAGE_LOGIN" not in commands.environment
+    output = capsys.readouterr()
+    assert "file-key" not in output.out + output.err
+    assert "registry-key" not in output.out + output.err
 
 
 @pytest.mark.parametrize(

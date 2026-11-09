@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
 from vast_runner import RunError
 from vast_runner.artifacts import PROJECT_DIRECTORY
 from vast_runner.storage import STORAGE_ERRORS
@@ -18,6 +19,7 @@ DEFAULT_GPU_NAMES = ["RTX 3090", "RTX PRO 4000"]
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_dotenv(PROJECT_DIRECTORY / ".env", override=False)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--dataset", type=Path, default=PROJECT_DIRECTORY / "notebooks/prepared/train.parquet"
