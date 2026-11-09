@@ -10,6 +10,16 @@ import time
 import urllib.request
 from pathlib import Path
 
+CHECKS = {
+    "cuda": {"script": "smoke_test.py", "report": "cuda-smoke.json", "timeout": 300},
+    "model": {"script": "model_load.py", "report": "model-load.json", "timeout": 1800},
+    "inference": {
+        "script": "inference_smoke.py",
+        "report": "inference-smoke.json",
+        "timeout": 1800,
+    },
+}
+
 
 def execute(
     job: dict,
@@ -21,7 +31,7 @@ def execute(
     result = {"run_id": job["run_id"], "outcome": "failed", "log": ""}
     try:
         check = job.get("check", "cuda")
-        if check not in {"cuda", "model"}:
+        if check not in CHECKS:
             raise ValueError("Unknown check")
         if check == "cuda":
             with urllib.request.urlopen(job["sample_url"], timeout=60) as response:
@@ -29,20 +39,18 @@ def execute(
             if hashlib.sha256(data).hexdigest() != job["sample_sha256"]:
                 raise ValueError("Sample checksum mismatch")
             sample.write_bytes(data)
+        settings = CHECKS[check]
         if report is None:
-            report = Path(
-                "/artifacts/model-load.json" if check == "model" else "/artifacts/cuda-smoke.json"
-            )
+            report = Path("/artifacts") / settings["report"]
         report.unlink(missing_ok=True)
-        script = "model_load.py" if check == "model" else "smoke_test.py"
         process = subprocess.run(
-            command or [sys.executable, f"/opt/qwen-commit/{script}"],
+            command or [sys.executable, f"/opt/qwen-commit/{settings['script']}"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=1800 if check == "model" else 300,
+            timeout=settings["timeout"],
             check=False,
         )
         result["log"] = process.stdout[-65536:]

@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from startup import CHECKS
+
 from . import RunError
 from .artifacts import RUNS_DIRECTORY, training_sample, write_json
 from .commands import Commands
@@ -30,8 +32,8 @@ def run_smoke(
     commands_type=Commands,
     transfer_type=Transfer,
 ) -> Path:
-    if check not in {"cuda", "model"}:
-        raise ValueError("Choose the cuda or model check.")
+    if check not in CHECKS:
+        raise ValueError("Choose the cuda, model, or inference check.")
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:12]
     directory = (runs_directory / run_id).resolve()
     directory.mkdir(parents=True, mode=0o700)

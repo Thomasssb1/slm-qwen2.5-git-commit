@@ -25,6 +25,41 @@ run. The container has up to 30 minutes to download and load the model, within
 the runner's overall rental timeout; the same price limit and cleanup recovery
 apply. Downloaded weights live in the rental's disposable model cache.
 
+## Generate commit subjects
+
+```console
+uv run python experiments/cuda/run.py --check inference
+```
+
+This loads Qwen once and generates from three synthetic diffs: a single-file
+change, a change with tests in a second file, and a diff longer than the input
+budget. It repeats the first case to check token-for-token repeatability on
+the same runtime. It does not read the training, validation, or test splits.
+
+`generation.generate_subject(diff, model=model, tokenizer=tokenizer)` is the
+reusable inference function. It uses the exact system prompt in
+`commit_subject_prompt.txt`, with only the diff in the user message, and
+Qwen's pinned chat template. The first 4,096 diff tokens are retained; the
+system prompt and chat framing are not truncated. Greedy decoding uses
+`do_sample=False`, `num_beams=1`, and `max_new_tokens=64`, with the model's EOS
+tokens. These settings are explicit instead of inheriting Qwen's sampling
+defaults.
+
+The 64-token generation limit is separate from the 72-character acceptance
+limit. Results preserve the decoded response in `raw_output`. An accepted
+`subject` has surrounding spaces/tabs removed and must be nonempty, at most
+72 Unicode code points, and contain no line breaks, surrounding quotes,
+recognized Markdown, or common preambles. Responses that reach the token
+limit without EOS also fail. Invalid responses have `subject=null` and
+machine-readable `errors`; they are never clipped or rewritten. These checks
+do not assess semantic correctness or detect every possible explanation.
+
+The private `inference-smoke.json` report saves every raw response, accepted
+subject, failure reason, original/retained token counts, truncation flag,
+prompt text/hash, full generation configuration, and generation time alongside
+the model-load evidence. A format failure is a recorded model result, while
+runtime errors, inconsistent reports, or a repeatability failure fail the run.
+
 ## One-command Vast smoke test
 
 Requires a funded Vast account, Terraform < 2.0, AWS credentials with S3 access,

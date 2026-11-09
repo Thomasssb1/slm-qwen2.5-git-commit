@@ -234,7 +234,9 @@ def test_container_downloads_runs_and_uploads_outcome_then_exits_after_hold(
         assert "smoke diagnostics" in result["log"]
 
 
-@pytest.mark.parametrize("check, expected_timeout", [("cuda", 300), ("model", 1800)])
+@pytest.mark.parametrize(
+    "check, expected_timeout", [("cuda", 300), ("model", 1800), ("inference", 1800)]
+)
 def test_container_reports_subprocess_timeout(
     http_transfer, tmp_path, monkeypatch, check, expected_timeout
 ):
@@ -258,7 +260,10 @@ def test_container_reports_subprocess_timeout(
 
 
 @pytest.mark.parametrize("failure", [None, "process", "missing-report"])
-def test_model_container_runs_without_sample_urls_and_requires_a_fresh_report(tmp_path, failure):
+@pytest.mark.parametrize("check", ["model", "inference"])
+def test_model_container_runs_without_sample_urls_and_requires_a_fresh_report(
+    tmp_path, failure, check
+):
     report = tmp_path / "model-load.json"
     report.write_text('{"stale": true}')
     script = tmp_path / "model.py"
@@ -272,7 +277,7 @@ def test_model_container_runs_without_sample_urls_and_requires_a_fresh_report(tm
         + ("raise SystemExit(1)\n" if failure == "process" else "")
     )
     result = remote.execute(
-        {"run_id": "model-run", "check": "model"},
+        {"run_id": "model-run", "check": check},
         sample=tmp_path / "sample",
         report=report,
         command=[sys.executable, str(script)],

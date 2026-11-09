@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import io
 import json
@@ -24,6 +25,7 @@ runner = importlib.util.module_from_spec(SPEC)
 with pytest.MonkeyPatch.context() as imports:
     imports.syspath_prepend(str(RUNNER_PATH.parent))
     SPEC.loader.exec_module(runner)
+    from generation import SYSTEM_PROMPT
     from vast_runner import RunError, artifacts
     from vast_runner import commands as command_tools
     from vast_runner import terraform as terraform_tools
@@ -66,6 +68,48 @@ def valid_model_report() -> dict:
         "load_seconds": 20.5,
         "cuda_memory_allocated_bytes": 3100000000,
         "cuda_peak_memory_allocated_bytes": 3200000000,
+    }
+
+
+def valid_inference_report() -> dict:
+    examples = {}
+    for name in ("single_file", "multiple_files", "truncated"):
+        original = 5000 if name == "truncated" else 100
+        examples[name] = {
+            "system_prompt": SYSTEM_PROMPT,
+            "system_prompt_sha256": hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest(),
+            "max_diff_tokens": 4096,
+            "max_subject_characters": 72,
+            "truncation_side": "right",
+            "generation_config": {
+                "do_sample": False,
+                "num_beams": 1,
+                "num_return_sequences": 1,
+                "max_new_tokens": 64,
+                "min_new_tokens": 0,
+                "temperature": 1.0,
+                "top_p": 1.0,
+                "top_k": 50,
+                "repetition_penalty": 1.0,
+                "use_cache": True,
+            },
+            "diff_tokens": original,
+            "diff_tokens_used": min(original, 4096),
+            "diff_truncated": original > 4096,
+            "prompt_tokens": min(original, 4096) + 60,
+            "generated_tokens": 3,
+            "generated_token_ids": [123, 456, 151645],
+            "raw_output": "Trim whitespace from names",
+            "subject": "Trim whitespace from names",
+            "valid": True,
+            "errors": [],
+            "finish_reason": "eos",
+            "generation_seconds": 0.5,
+        }
+    return valid_model_report() | {
+        "examples": examples,
+        "repeat_matches": True,
+        "repeat_token_ids": examples["single_file"]["generated_token_ids"],
     }
 
 
@@ -190,6 +234,8 @@ class FakeTools:
                             self.cloud["tracked"].add("container")
                     check = variables["job"]["check"]
                     report = valid_model_report() if check == "model" else valid_report()
+                    if check == "inference":
+                        report = valid_inference_report()
                     if self.failure == "report":
                         report["cuda_tensor_checksum"] = 0
                     result = {
@@ -283,13 +329,22 @@ def test_model_check_needs_no_dataset_collects_model_evidence_and_cleans_up(tmp_
 
 def test_unknown_check_fails_before_creating_run_artifacts(tmp_path):
     invoke, cloud = invoke_fake(tmp_path, tmp_path / "missing", check="unknown")
-    with pytest.raises(ValueError, match="cuda or model"):
+    with pytest.raises(ValueError, match="cuda, model, or inference"):
         invoke()
     assert not (tmp_path / "runs").exists()
     assert cloud["rentals"] == 0
 
 
-def test_cli_model_check_saves_model_report_without_a_dataset(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize(
+    "check, filename, expected",
+    [
+        ("model", "model-load.json", valid_model_report),
+        ("inference", "inference-smoke.json", valid_inference_report),
+    ],
+)
+def test_cli_check_saves_model_or_inference_report_without_a_dataset(
+    tmp_path, monkeypatch, capsys, check, filename, expected
+):
     cloud = {"resources": set(), "tracked": set(), "rentals": 0, "uploaded": []}
     monkeypatch.setenv("VAST_API_KEY", "test-only-placeholder")
     monkeypatch.setattr(
@@ -302,12 +357,55 @@ def test_cli_model_check_saves_model_report_without_a_dataset(tmp_path, monkeypa
             transfer_type=lambda region: fake_transfer(cloud),
         ),
     )
-    assert runner.main(["--check", "model"]) == 0
-    report = next((tmp_path / "runs").glob("*/model-load.json"))
-    assert json.loads(report.read_text()) == valid_model_report()
-    assert "Model check passed" in capsys.readouterr().out
+    assert runner.main(["--check", check]) == 0
+    report = next((tmp_path / "runs").glob("*/" + filename))
+    assert json.loads(report.read_text()) == expected()
+    assert f"{check.capitalize()} check passed" in capsys.readouterr().out
     assert cloud["resources"] == set()
     assert cloud["uploaded"] == []
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"system_prompt": "wrong prompt"},
+        {"generation_config": {"do_sample": True, "num_beams": 1, "max_new_tokens": 64}},
+        {"diff_truncated": True},
+        {"diff_tokens_used": 4097},
+        {"raw_output": "x" * 73},
+        {"subject": "wrong subject"},
+        {"raw_output": None},
+        {"generated_token_ids": []},
+        {"finish_reason": "unknown"},
+    ],
+)
+def test_inference_report_rejects_wrong_prompt_settings_and_inconsistent_results(tmp_path, change):
+    report = valid_inference_report()
+    report["examples"]["single_file"].update(change)
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(report))
+    with pytest.raises(RunError, match="pinned inference check"):
+        artifacts.validate_report(path, check="inference")
+
+
+def test_inference_report_accepts_honestly_reported_format_failures(tmp_path):
+    report = valid_inference_report()
+    report["examples"]["multiple_files"].update(
+        raw_output="x" * 73, subject=None, valid=False, errors=["too_long"]
+    )
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(report))
+    assert artifacts.validate_report(path, check="inference") == report
+
+
+@pytest.mark.parametrize(
+    "change", [{"repeat_matches": False}, {"repeat_token_ids": [0]}, {"examples": {}}]
+)
+def test_inference_report_requires_all_cases_and_repeatable_output(tmp_path, change):
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(valid_inference_report() | change))
+    with pytest.raises(RunError, match="pinned inference check"):
+        artifacts.validate_report(path, check="inference")
 
 
 def saved_run(tmp_path):

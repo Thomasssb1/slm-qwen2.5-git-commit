@@ -8,6 +8,14 @@ from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+from generation import (
+    GENERATION_SETTINGS,
+    MAX_DIFF_TOKENS,
+    MAX_NEW_TOKENS,
+    MAX_SUBJECT_CHARACTERS,
+    SYSTEM_PROMPT,
+    output_errors,
+)
 from model_spec import MODEL_ID, MODEL_REVISION, TRANSFORMERS_VERSION
 
 from . import RunError
@@ -54,7 +62,7 @@ def validate_report(path: Path, *, check: str = "cuda") -> dict:
             and str(report["torch_version"]).split("+")[0] == "2.12.1"
             and math.isclose(float(report["cuda_tensor_checksum"]), expected_checksum, rel_tol=1e-6)
         )
-        if check == "model":
+        if check in {"model", "inference"}:
             valid = (
                 valid
                 and report["model_id"] == MODEL_ID
@@ -71,10 +79,52 @@ def validate_report(path: Path, *, check: str = "cuda") -> dict:
                 < report["cuda_memory_allocated_bytes"]
                 <= report["cuda_peak_memory_allocated_bytes"]
             )
+            if check == "inference":
+                valid = valid and _valid_inference(report)
         else:
             valid = valid and check == "cuda" and report["one_batch_rows"] == 1
-    except (KeyError, TypeError, ValueError):
+    except (AttributeError, KeyError, TypeError, ValueError):
         valid = False
     if not valid:
         raise RunError(f"The downloaded report does not prove the pinned {check} check passed.")
     return report
+
+
+def _valid_inference(report: dict) -> bool:
+    """A smoke check proves generation ran; invalid model responses remain measurable."""
+    import hashlib
+
+    examples = report["examples"]
+    if set(examples) != {"single_file", "multiple_files", "truncated"}:
+        return False
+    for result in examples.values():
+        config = result["generation_config"]
+        errors = output_errors(
+            result["raw_output"], hit_token_limit=result["finish_reason"] == "token_limit"
+        )
+        if not (
+            result["system_prompt"] == SYSTEM_PROMPT
+            and result["system_prompt_sha256"] == hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest()
+            and result["max_diff_tokens"] == MAX_DIFF_TOKENS
+            and result["max_subject_characters"] == MAX_SUBJECT_CHARACTERS
+            and result["truncation_side"] == "right"
+            and all(config[key] == value for key, value in GENERATION_SETTINGS.items())
+            and 0 < result["diff_tokens_used"] == min(result["diff_tokens"], MAX_DIFF_TOKENS)
+            and result["diff_truncated"] == (result["diff_tokens"] > MAX_DIFF_TOKENS)
+            and result["prompt_tokens"] > result["diff_tokens_used"]
+            and 0
+            < result["generated_tokens"]
+            == len(result["generated_token_ids"])
+            <= MAX_NEW_TOKENS
+            and result["finish_reason"] in {"eos", "token_limit"}
+            and result["errors"] == errors
+            and result["valid"] == (not errors)
+            and result["subject"] == (None if errors else result["raw_output"].strip(" \t"))
+            and 0 <= result["generation_seconds"] < float("inf")
+        ):
+            return False
+    return (
+        examples["truncated"]["diff_truncated"] is True
+        and report["repeat_matches"] is True
+        and report["repeat_token_ids"] == examples["single_file"]["generated_token_ids"]
+    )

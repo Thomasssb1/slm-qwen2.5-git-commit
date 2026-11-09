@@ -199,6 +199,22 @@ run "reject_unknown_check" {
   expect_failures = [var.job]
 }
 
+run "inference_without_dataset" {
+  command = plan
+  variables {
+    job = {
+      run_id       = "inference-test"
+      check        = "inference"
+      result_url   = "https://example.invalid/result"
+      hold_seconds = 3000
+    }
+  }
+  assert {
+    condition     = jsondecode(vastai_instance.smoke[0].args[1]).check == "inference" && jsondecode(vastai_instance.smoke[0].args[1]).sample_url == null
+    error_message = "Run synthetic inference without transferring a private dataset."
+  }
+}
+
 run "reject_cuda_without_sample" {
   command = plan
   variables {

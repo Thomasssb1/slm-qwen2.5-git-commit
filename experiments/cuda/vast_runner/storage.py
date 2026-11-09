@@ -8,6 +8,7 @@ from pathlib import Path
 import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
+from startup import CHECKS
 
 from . import RunError
 from .artifacts import validate_report, write_json
@@ -72,7 +73,7 @@ class Transfer:
             (directory / "smoke.log").write_text(str(result.get("log", "")), encoding="utf-8")
             if result.get("outcome") != "passed":
                 raise RunError(f"The container smoke test failed; see {directory / 'smoke.log'}")
-            report = directory / ("model-load.json" if check == "model" else "cuda-smoke.json")
+            report = directory / CHECKS[check]["report"]
             write_json(report, result.get("report"))
             validate_report(report, check=check)
             return report

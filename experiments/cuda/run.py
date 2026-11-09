@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
+from startup import CHECKS
 from vast_runner import RunError
 from vast_runner.artifacts import PROJECT_DIRECTORY
 from vast_runner.storage import STORAGE_ERRORS
@@ -23,9 +24,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--check",
-        choices=("cuda", "model"),
+        choices=tuple(CHECKS),
         default="cuda",
-        help="Check CUDA with a training row, or load Qwen on CUDA without a dataset.",
+        help="Check CUDA, load Qwen, or generate subjects from synthetic diffs.",
     )
     parser.add_argument(
         "--dataset", type=Path, default=PROJECT_DIRECTORY / "notebooks/prepared/train.parquet"

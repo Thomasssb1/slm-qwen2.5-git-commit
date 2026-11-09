@@ -10,7 +10,8 @@ from pathlib import Path
 from model_spec import MODEL_ID, MODEL_REVISION
 
 
-def load_report() -> dict:
+def load_model() -> tuple:
+    """Return the loaded model, tokenizer, and evidence so inference can reuse them."""
     import torch
     import transformers
     from smoke_test import _cuda_diagnostic
@@ -68,6 +69,11 @@ def load_report() -> dict:
         cuda_peak_memory_allocated_bytes=torch.cuda.max_memory_allocated(device),
         ran_at_utc=datetime.now(UTC).isoformat(timespec="seconds"),
     )
+    return model, tokenizer, diagnostic
+
+
+def load_report() -> dict:
+    _model, _tokenizer, diagnostic = load_model()
     return diagnostic
 
 
