@@ -25,10 +25,13 @@ def run_smoke(
     timeout_minutes: float,
     image_repository: str = "ghcr.io/thomasssb1/qwen-commit-cuda",
     aws_region: str | None = None,
+    check: str = "cuda",
     runs_directory: Path = RUNS_DIRECTORY,
     commands_type=Commands,
     transfer_type=Transfer,
 ) -> Path:
+    if check not in {"cuda", "model"}:
+        raise ValueError("Choose the cuda or model check.")
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:12]
     directory = (runs_directory / run_id).resolve()
     directory.mkdir(parents=True, mode=0o700)
@@ -39,11 +42,15 @@ def run_smoke(
         "label": "qwen-cuda-" + run_id,
         "outcome": "preparing",
         "cleanup": "not-needed",
+        "check": check,
     }
     write_json(directory / "run.json", state)
     print(f"Run artifacts: {directory}", flush=True)
 
-    training_sample(dataset, directory / "train.parquet")
+    sample = None
+    if check == "cuda":
+        sample = directory / "train.parquet"
+        training_sample(dataset, sample)
     transfer = transfer_type(aws_region)
     commands.run(["terraform", "version"])
     commands.run(["docker", "info"])
@@ -91,8 +98,9 @@ def run_smoke(
         state["bucket"] = bucket
         write_json(directory / "run.json", state)
         variables["job"] = transfer.prepare(
-            bucket, directory / "train.parquet", run_id, math.ceil(timeout_minutes * 60) + 300
+            bucket, sample, run_id, math.ceil(timeout_minutes * 60) + 300
         )
+        variables["job"]["check"] = check
         variables["launch"] = True
         write_json(infrastructure / "run.auto.tfvars.json", variables)
         print(
@@ -117,8 +125,8 @@ def run_smoke(
             or not 0 <= price <= max_hourly_price
         ):
             raise RunError("The provisioned instance exceeds the requested hourly price limit.")
-        print("Waiting for the container's smoke-test result...", flush=True)
-        report = transfer.collect(bucket, directory, run_id, deadline)
+        print(f"Waiting for the container's {check} result...", flush=True)
+        report = transfer.collect(bucket, directory, run_id, deadline, check=check)
         state["outcome"] = "passed"
     except BaseException:
         state["outcome"] = "failed"

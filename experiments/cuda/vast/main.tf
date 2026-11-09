@@ -35,7 +35,7 @@ resource "vastai_instance" "smoke" {
   lifecycle {
     precondition {
       condition     = var.job != null
-      error_message = "Upload the sample and provide the transfer job before launching."
+      error_message = "Provide the transfer job before launching."
     }
   }
 

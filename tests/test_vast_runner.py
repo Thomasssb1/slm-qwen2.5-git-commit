@@ -50,6 +50,25 @@ def valid_report() -> dict:
     }
 
 
+def valid_model_report() -> dict:
+    report = valid_report()
+    del report["one_batch_rows"]
+    return report | {
+        "model_id": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+        "model_revision": "2e1fd397ee46e1388853d2af2c993145b0f1098a",
+        "model_class": "Qwen2ForCausalLM",
+        "parameter_count": 1543714304,
+        "cuda_parameter_count": 1543714304,
+        "parameter_dtype": "bfloat16",
+        "tokenizer_vocab_size": 151665,
+        "tokenizer_probe_tokens": 4,
+        "transformers_version": "5.22.2",
+        "load_seconds": 20.5,
+        "cuda_memory_allocated_bytes": 3100000000,
+        "cuda_peak_memory_allocated_bytes": 3200000000,
+    }
+
+
 @pytest.fixture
 def training_file(tmp_path):
     path = tmp_path / "train.parquet"
@@ -169,7 +188,8 @@ class FakeTools:
                         self.cloud["rentals"] += 1
                         if self.failure != "untracked-create":
                             self.cloud["tracked"].add("container")
-                    report = valid_report()
+                    check = variables["job"]["check"]
+                    report = valid_model_report() if check == "model" else valid_report()
                     if self.failure == "report":
                         report["cuda_tensor_checksum"] = 0
                     result = {
@@ -178,7 +198,9 @@ class FakeTools:
                         "report": report,
                         "log": "CUDA subprocess output",
                     }
-                    self.cloud["objects"]["result.json"] = json.dumps(result).encode()
+                    self.cloud.setdefault("objects", {})["result.json"] = json.dumps(
+                        result
+                    ).encode()
                 (infrastructure / "terraform.tfstate").write_text(
                     json.dumps({"resources": sorted(self.cloud["tracked"])})
                 )
@@ -216,7 +238,7 @@ class FakeTools:
         return subprocess.CompletedProcess(arguments, 0, output, "")
 
 
-def invoke_fake(tmp_path, training_file, failure=None):
+def invoke_fake(tmp_path, training_file, failure=None, *, check="cuda"):
     cloud = {"resources": set(), "tracked": set(), "rentals": 0, "uploaded": []}
 
     def invoke():
@@ -228,9 +250,64 @@ def invoke_fake(tmp_path, training_file, failure=None):
             runs_directory=tmp_path / "runs",
             commands_type=lambda directory: FakeTools(directory, cloud, failure),
             transfer_type=lambda region: fake_transfer(cloud, failure),
+            check=check,
         )
 
     return invoke, cloud
+
+
+@pytest.mark.parametrize("failure", [None, "smoke", "report", "timeout"])
+def test_model_check_needs_no_dataset_collects_model_evidence_and_cleans_up(tmp_path, failure):
+    invoke, cloud = invoke_fake(tmp_path, tmp_path / "nonexistent.parquet", failure, check="model")
+    if failure:
+        with pytest.raises(RunError):
+            invoke()
+    else:
+        report = invoke()
+        assert report.name == "model-load.json"
+        assert json.loads(report.read_text()) == valid_model_report()
+    assert cloud["uploaded"] == []
+    assert cloud["resources"] == set()
+    assert cloud["rentals"] == 1
+    state = saved_run(tmp_path)
+    assert state["check"] == "model"
+    assert state["outcome"] == ("failed" if failure else "passed")
+    assert state["cleanup"] == "complete"
+    directory = next((tmp_path / "runs").iterdir())
+    assert not (directory / "train.parquet").exists()
+    job = json.loads((directory / "terraform/run.auto.tfvars.json").read_text())["job"]
+    assert job["check"] == "model"
+    assert "sample_url" not in job
+    assert "sample_sha256" not in job
+
+
+def test_unknown_check_fails_before_creating_run_artifacts(tmp_path):
+    invoke, cloud = invoke_fake(tmp_path, tmp_path / "missing", check="unknown")
+    with pytest.raises(ValueError, match="cuda or model"):
+        invoke()
+    assert not (tmp_path / "runs").exists()
+    assert cloud["rentals"] == 0
+
+
+def test_cli_model_check_saves_model_report_without_a_dataset(tmp_path, monkeypatch, capsys):
+    cloud = {"resources": set(), "tracked": set(), "rentals": 0, "uploaded": []}
+    monkeypatch.setenv("VAST_API_KEY", "test-only-placeholder")
+    monkeypatch.setattr(
+        runner,
+        "run_smoke",
+        partial(
+            runner.run_smoke,
+            runs_directory=tmp_path / "runs",
+            commands_type=lambda directory: FakeTools(directory, cloud),
+            transfer_type=lambda region: fake_transfer(cloud),
+        ),
+    )
+    assert runner.main(["--check", "model"]) == 0
+    report = next((tmp_path / "runs").glob("*/model-load.json"))
+    assert json.loads(report.read_text()) == valid_model_report()
+    assert "Model check passed" in capsys.readouterr().out
+    assert cloud["resources"] == set()
+    assert cloud["uploaded"] == []
 
 
 def saved_run(tmp_path):
@@ -552,6 +629,41 @@ def test_report_requires_cuda_batch_and_checksum_evidence(tmp_path, change):
     path.write_text(json.dumps(valid_report() | change))
     with pytest.raises(RunError, match="does not prove"):
         artifacts.validate_report(path)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"model_id": "another-model"},
+        {"model_revision": "main"},
+        {"model_class": "AnotherModel"},
+        {"parameter_count": 0},
+        {"cuda_parameter_count": 100},
+        {"parameter_dtype": "float32"},
+        {"tokenizer_vocab_size": 0},
+        {"tokenizer_probe_tokens": 0},
+        {"transformers_version": "0.0.0"},
+        {"load_seconds": float("nan")},
+        {"load_seconds": float("inf")},
+        {"load_seconds": -1},
+        {"cuda_memory_allocated_bytes": 0},
+        {"cuda_peak_memory_allocated_bytes": 1},
+        {"cuda_device_count": 0},
+        {"cuda_runtime_version": "12.8"},
+    ],
+)
+def test_model_report_rejects_wrong_checkpoint_cpu_weights_and_missing_evidence(tmp_path, change):
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(valid_model_report() | change))
+    with pytest.raises(RunError, match="pinned model check"):
+        artifacts.validate_report(path, check="model")
+
+
+def test_cuda_report_cannot_pass_as_a_model_load(tmp_path):
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(valid_report()))
+    with pytest.raises(RunError, match="pinned model check"):
+        artifacts.validate_report(path, check="model")
 
 
 def test_entry_point_help_works_from_another_directory(tmp_path, monkeypatch):

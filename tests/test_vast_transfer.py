@@ -88,6 +88,16 @@ def test_missing_aws_credentials_fail_before_provisioning(monkeypatch):
         storage.Transfer(None)
 
 
+def test_model_transfer_only_signs_result_upload_without_sending_a_sample(transfer):
+    # No S3 requests are expected: a model load uses only the public checkpoint.
+    with Stubber(transfer.client):
+        job = transfer.prepare("test-bucket", None, "model-run", 3900)
+    assert "sample_url" not in job
+    assert "sample_sha256" not in job
+    assert urlparse(job["result_url"]).path == "/result.json"
+    assert job["run_id"] == "model-run"
+
+
 def test_missing_result_polls_until_deadline(tmp_path, transfer, monkeypatch):
     clock = Clock()
     monkeypatch.setattr(storage, "time", clock)
@@ -224,14 +234,19 @@ def test_container_downloads_runs_and_uploads_outcome_then_exits_after_hold(
         assert "smoke diagnostics" in result["log"]
 
 
-def test_container_reports_subprocess_timeout(http_transfer, tmp_path, monkeypatch):
+@pytest.mark.parametrize("check, expected_timeout", [("cuda", 300), ("model", 1800)])
+def test_container_reports_subprocess_timeout(
+    http_transfer, tmp_path, monkeypatch, check, expected_timeout
+):
     def timeout(*args, **kwargs):
-        raise subprocess.TimeoutExpired("smoke", 300)
+        assert kwargs["timeout"] == expected_timeout
+        raise subprocess.TimeoutExpired("smoke", expected_timeout)
 
     monkeypatch.setattr(remote.subprocess, "run", timeout)
     result = remote.execute(
         {
             "run_id": "fixture-run",
+            "check": check,
             "sample_url": http_transfer["url"],
             "sample_sha256": hashlib.sha256(http_transfer["sample"]).hexdigest(),
         },
@@ -240,3 +255,41 @@ def test_container_reports_subprocess_timeout(http_transfer, tmp_path, monkeypat
     )
     assert result["outcome"] == "failed"
     assert "TimeoutExpired" in result["log"]
+
+
+@pytest.mark.parametrize("failure", [None, "process", "missing-report"])
+def test_model_container_runs_without_sample_urls_and_requires_a_fresh_report(tmp_path, failure):
+    report = tmp_path / "model-load.json"
+    report.write_text('{"stale": true}')
+    script = tmp_path / "model.py"
+    script.write_text(
+        "from pathlib import Path\nprint('model diagnostics')\n"
+        + (
+            f"Path({str(report)!r}).write_text('{{\"loaded\": true}}')\n"
+            if failure != "missing-report"
+            else ""
+        )
+        + ("raise SystemExit(1)\n" if failure == "process" else "")
+    )
+    result = remote.execute(
+        {"run_id": "model-run", "check": "model"},
+        sample=tmp_path / "sample",
+        report=report,
+        command=[sys.executable, str(script)],
+    )
+    assert result["outcome"] == ("failed" if failure else "passed")
+    assert "model diagnostics" in result["log"]
+    assert not (tmp_path / "sample").exists()
+    if not failure:
+        assert result["report"] == {"loaded": True}
+
+
+def test_container_rejects_unknown_check_without_starting_a_command(tmp_path):
+    marker = tmp_path / "ran"
+    result = remote.execute(
+        {"run_id": "model-run", "check": "unknown"},
+        command=[sys.executable, "-c", f"from pathlib import Path; Path({str(marker)!r}).touch()"],
+    )
+    assert result["outcome"] == "failed"
+    assert "ValueError" in result["log"]
+    assert not marker.exists()

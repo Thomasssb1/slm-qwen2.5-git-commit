@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+from model_spec import MODEL_ID, MODEL_REVISION, TRANSFORMERS_VERSION
 
 from . import RunError
 
@@ -40,22 +41,40 @@ def training_sample(source: Path, destination: Path) -> None:
     pq.write_table(table, destination, compression="zstd")
 
 
-def validate_report(path: Path) -> dict:
+def validate_report(path: Path, *, check: str = "cuda") -> dict:
     """Require a real, nonempty CUDA result instead of just a zero exit status."""
     report = json.loads(path.read_text(encoding="utf-8"))
     expected_checksum = sum(number * number for number in range(1024))
     try:
         valid = (
-            report["one_batch_rows"] == 1
-            and report["cuda_device_count"] >= 1
+            report["cuda_device_count"] >= 1
             and bool(report["cuda_device_name"])
             and report["cuda_device_total_memory_bytes"] > 0
             and str(report["cuda_runtime_version"]).startswith("13.2")
             and str(report["torch_version"]).split("+")[0] == "2.12.1"
             and math.isclose(float(report["cuda_tensor_checksum"]), expected_checksum, rel_tol=1e-6)
         )
+        if check == "model":
+            valid = (
+                valid
+                and report["model_id"] == MODEL_ID
+                and report["model_revision"] == MODEL_REVISION
+                and report["model_class"] == "Qwen2ForCausalLM"
+                and report["parameter_count"] > 0
+                and report["cuda_parameter_count"] == report["parameter_count"]
+                and report["parameter_dtype"] == "bfloat16"
+                and report["tokenizer_vocab_size"] > 0
+                and report["tokenizer_probe_tokens"] > 0
+                and report["transformers_version"] == TRANSFORMERS_VERSION
+                and 0 <= report["load_seconds"] < float("inf")
+                and 0
+                < report["cuda_memory_allocated_bytes"]
+                <= report["cuda_peak_memory_allocated_bytes"]
+            )
+        else:
+            valid = valid and check == "cuda" and report["one_batch_rows"] == 1
     except (KeyError, TypeError, ValueError):
         valid = False
     if not valid:
-        raise RunError("The downloaded report does not prove the pinned CUDA smoke test passed.")
+        raise RunError(f"The downloaded report does not prove the pinned {check} check passed.")
     return report

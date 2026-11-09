@@ -169,3 +169,44 @@ run "reject_launch_without_transfer_job" {
   variables { job = null }
   expect_failures = [vastai_instance.smoke[0]]
 }
+
+run "model_load_without_dataset" {
+  command = plan
+  variables {
+    job = {
+      run_id       = "model-test"
+      check        = "model"
+      result_url   = "https://example.invalid/result"
+      hold_seconds = 3000
+    }
+  }
+  assert {
+    condition     = jsondecode(vastai_instance.smoke[0].args[1]).check == "model" && jsondecode(vastai_instance.smoke[0].args[1]).sample_url == null
+    error_message = "Pass model mode through to the container without requiring a training sample."
+  }
+}
+
+run "reject_unknown_check" {
+  command = plan
+  variables {
+    job = {
+      run_id       = "bad-test"
+      check        = "unknown"
+      result_url   = "https://example.invalid/result"
+      hold_seconds = 3000
+    }
+  }
+  expect_failures = [var.job]
+}
+
+run "reject_cuda_without_sample" {
+  command = plan
+  variables {
+    job = {
+      run_id       = "bad-test"
+      result_url   = "https://example.invalid/result"
+      hold_seconds = 3000
+    }
+  }
+  expect_failures = [var.job]
+}

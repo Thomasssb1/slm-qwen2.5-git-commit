@@ -3,3 +3,5 @@
 !requirements.txt
 !smoke_test.py
 !startup.py
+!model_load.py
+!model_spec.py

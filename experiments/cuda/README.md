@@ -2,6 +2,29 @@
 
 This is the isolated NVIDIA CUDA environment for the base-model, SFT, and DPO work. It is separate from the rest of the project so that local development never installs CUDA or training dependencies.
 
+## Load Qwen on a rental GPU
+
+With the Vast, AWS, and registry prerequisites below configured, run:
+
+```console
+uv run python experiments/cuda/run.py --check model
+```
+
+This downloads the public `Qwen/Qwen2.5-Coder-1.5B-Instruct` tokenizer and
+Safetensors weights at revision `2e1fd397ee46e1388853d2af2c993145b0f1098a`,
+using Transformers 5.22.2 in the CUDA image. It loads the full model in BF16
+onto the GPU, checks that every parameter is on CUDA, and exercises the
+tokenizer. No prepared dataset or Hugging Face token is required. This check
+does not generate subjects, evaluate the model, or train adapters.
+
+The runner saves `model-load.json` and `smoke.log` under its private run
+directory, then destroys the GPU rental and temporary S3 bucket. The report
+records the model revision, library versions, parameter count, GPU placement,
+load time, and allocated/peak GPU memory. A failed or partial load fails the
+run. The container has up to 30 minutes to download and load the model, within
+the runner's overall rental timeout; the same price limit and cleanup recovery
+apply. Downloaded weights live in the rental's disposable model cache.
+
 ## One-command Vast smoke test
 
 Requires a funded Vast account, Terraform < 2.0, AWS credentials with S3 access,

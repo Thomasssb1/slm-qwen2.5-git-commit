@@ -31,15 +31,9 @@ class Transfer:
             ),
         )
 
-    def prepare(self, bucket: str, sample: Path, run_id: str, seconds: int) -> dict:
-        data = sample.read_bytes()
-        self.client.put_object(Bucket=bucket, Key="train.parquet", Body=data)
-        return {
+    def prepare(self, bucket: str, sample: Path | None, run_id: str, seconds: int) -> dict:
+        job = {
             "run_id": run_id,
-            "sample_sha256": hashlib.sha256(data).hexdigest(),
-            "sample_url": self.client.generate_presigned_url(
-                "get_object", Params={"Bucket": bucket, "Key": "train.parquet"}, ExpiresIn=seconds
-            ),
             "result_url": self.client.generate_presigned_url(
                 "put_object",
                 Params={"Bucket": bucket, "Key": "result.json", "ContentType": "application/json"},
@@ -47,8 +41,18 @@ class Transfer:
             ),
             "hold_seconds": seconds,
         }
+        if sample is not None:
+            data = sample.read_bytes()
+            self.client.put_object(Bucket=bucket, Key="train.parquet", Body=data)
+            job["sample_sha256"] = hashlib.sha256(data).hexdigest()
+            job["sample_url"] = self.client.generate_presigned_url(
+                "get_object", Params={"Bucket": bucket, "Key": "train.parquet"}, ExpiresIn=seconds
+            )
+        return job
 
-    def collect(self, bucket: str, directory: Path, run_id: str, deadline: float) -> Path:
+    def collect(
+        self, bucket: str, directory: Path, run_id: str, deadline: float, *, check: str = "cuda"
+    ) -> Path:
         while time.monotonic() < deadline:
             try:
                 response = self.client.get_object(Bucket=bucket, Key="result.json")
@@ -68,9 +72,9 @@ class Transfer:
             (directory / "smoke.log").write_text(str(result.get("log", "")), encoding="utf-8")
             if result.get("outcome") != "passed":
                 raise RunError(f"The container smoke test failed; see {directory / 'smoke.log'}")
-            report = directory / "cuda-smoke.json"
+            report = directory / ("model-load.json" if check == "model" else "cuda-smoke.json")
             write_json(report, result.get("report"))
-            validate_report(report)
+            validate_report(report, check=check)
             return report
         raise RunError("The container did not return a result within the rental time limit.")
 

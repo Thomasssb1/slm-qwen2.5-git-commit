@@ -22,6 +22,12 @@ def main(argv: list[str] | None = None) -> int:
     load_dotenv(PROJECT_DIRECTORY / ".env", override=False)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--check",
+        choices=("cuda", "model"),
+        default="cuda",
+        help="Check CUDA with a training row, or load Qwen on CUDA without a dataset.",
+    )
+    parser.add_argument(
         "--dataset", type=Path, default=PROJECT_DIRECTORY / "notebooks/prepared/train.parquet"
     )
     parser.add_argument(
@@ -63,8 +69,9 @@ def main(argv: list[str] | None = None) -> int:
                 timeout_minutes=arguments.timeout_minutes,
                 image_repository=arguments.image_repository,
                 aws_region=arguments.aws_region,
+                check=arguments.check,
             )
-            print(f"CUDA smoke test passed. Report: {report}")
+            print(f"{arguments.check.capitalize()} check passed. Report: {report}")
     except KeyboardInterrupt:
         print("Interrupted. Check run.json for cleanup status.", file=sys.stderr)
         return 130

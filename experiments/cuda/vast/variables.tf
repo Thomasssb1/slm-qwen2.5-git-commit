@@ -4,7 +4,7 @@ variable "aws_region" {
 }
 
 variable "launch" {
-  description = "Create storage first; launch after the runner uploads the sample."
+  description = "Create storage first; launch after the runner prepares the transfer job."
   type        = bool
   default     = false
 }
@@ -24,13 +24,19 @@ variable "image_login" {
 variable "job" {
   type = object({
     run_id        = string
-    sample_sha256 = string
-    sample_url    = string
+    check         = optional(string, "cuda")
+    sample_sha256 = optional(string)
+    sample_url    = optional(string)
     result_url    = string
     hold_seconds  = number
   })
   sensitive = true
   default   = null
+
+  validation {
+    condition     = var.job == null ? true : contains(["cuda", "model"], var.job.check) && (var.job.check == "model" || (var.job.sample_url != null && var.job.sample_sha256 != null))
+    error_message = "Choose cuda with a sample URL and checksum, or model without a dataset."
+  }
 }
 
 variable "run_label" {

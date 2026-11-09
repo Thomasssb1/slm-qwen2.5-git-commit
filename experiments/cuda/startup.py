@@ -15,25 +15,34 @@ def execute(
     job: dict,
     *,
     sample: Path = Path("/datasets/train.parquet"),
-    report: Path = Path("/artifacts/cuda-smoke.json"),
+    report: Path | None = None,
     command: list[str] | None = None,
 ) -> dict:
     result = {"run_id": job["run_id"], "outcome": "failed", "log": ""}
     try:
-        with urllib.request.urlopen(job["sample_url"], timeout=60) as response:
-            data = response.read()
-        if hashlib.sha256(data).hexdigest() != job["sample_sha256"]:
-            raise ValueError("Sample checksum mismatch")
-        sample.write_bytes(data)
+        check = job.get("check", "cuda")
+        if check not in {"cuda", "model"}:
+            raise ValueError("Unknown check")
+        if check == "cuda":
+            with urllib.request.urlopen(job["sample_url"], timeout=60) as response:
+                data = response.read()
+            if hashlib.sha256(data).hexdigest() != job["sample_sha256"]:
+                raise ValueError("Sample checksum mismatch")
+            sample.write_bytes(data)
+        if report is None:
+            report = Path(
+                "/artifacts/model-load.json" if check == "model" else "/artifacts/cuda-smoke.json"
+            )
         report.unlink(missing_ok=True)
+        script = "model_load.py" if check == "model" else "smoke_test.py"
         process = subprocess.run(
-            command or [sys.executable, "/opt/qwen-commit/smoke_test.py"],
+            command or [sys.executable, f"/opt/qwen-commit/{script}"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=300,
+            timeout=1800 if check == "model" else 300,
             check=False,
         )
         result["log"] = process.stdout[-65536:]
