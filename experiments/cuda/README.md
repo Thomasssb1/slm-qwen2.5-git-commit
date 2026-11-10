@@ -90,6 +90,26 @@ limit applies. Prediction artifacts remain gitignored, and the rental and
 temporary bucket are removed after collection. Compliance summaries and semantic
 review are separate from this prediction-generation step.
 
+## Evaluate the baseline
+
+Run the local evaluator against a completed validation run:
+
+```console
+uv run python experiments/cuda/evaluate.py experiments/cuda/artifacts/vast/RUN_ID
+```
+
+It verifies the saved predictions against the validated generation report and local input/reference join, then writes private `evaluation.json` and `evaluation.md` reports. They include mechanical formatting compliance, overlapping error counts, truncation counts, and generation latency for the full validation split and the approved-reference subset. No model is loaded, no cloud service is contacted, and no test data is read.
+
+Latency is CUDA-synchronized `model.generate` time, including the first call. Median and p95 use linear interpolation. Tokenization, model loading, provisioning, and transfer are excluded; model download/load time is reported separately. A formatting pass does not establish semantic correctness or detect every possible explanation.
+
+The evaluator also writes `semantic-review-template.json` with the first 12 approved-reference rows sorted by ID, including format failures. Copy it to `semantic-review.json`, identify the reviewer, and fill each `rating` and evidence-based `rationale` using the included rubric: `accurate`, `partial`, `incorrect`, or `uncertain`. Inspect the saved diff itself; a historical reference is context, not ground truth. Truncated inputs are flagged because the model did not see the full diff. The sample is descriptive, not an estimate of full-split accuracy.
+
+```console
+uv run python experiments/cuda/evaluate.py experiments/cuda/artifacts/vast/RUN_ID --review experiments/cuda/artifacts/vast/RUN_ID/semantic-review.json
+```
+
+Reviews must match the prediction artifact's SHA-256 and the complete ordered sample. Existing templates and prediction artifacts are preserved. If no references were approved, subset metrics are unavailable and no semantic sample is selected. Keep all reports, diffs, and review annotations in the ignored run directory; the PR can contain aggregate findings without source examples.
+
 ## One-command Vast smoke test
 
 Requires a funded Vast account, Terraform < 2.0, AWS credentials with S3 access,

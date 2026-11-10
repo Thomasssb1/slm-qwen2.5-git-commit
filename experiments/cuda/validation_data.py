@@ -73,7 +73,7 @@ def prepare_validation(source: Path, directory: Path, reviewed: Path | None = No
     }
 
 
-def save_predictions(report: dict, directory: Path, *, run_id: str) -> Path:
+def join_predictions(report: dict, directory: Path) -> list[dict]:
     """Join validated predictions to the exact local inputs and references, in source order."""
     inputs = directory / INPUT_FILENAME
     rows = read_rows(inputs, ["id", "diff"], exact=True)
@@ -95,6 +95,12 @@ def save_predictions(report: dict, directory: Path, *, run_id: str) -> Path:
         record["predicted_subject"] = record.pop("subject")
         record.update(reference, diff=row["diff"])
         records.append(record)
+    return records
+
+
+def save_predictions(report: dict, directory: Path, *, run_id: str) -> Path:
+    """Save the complete local join with generation settings in Parquet metadata."""
+    records = join_predictions(report, directory)
     table = pa.Table.from_pylist(records)
     for name, data_type in (
         ("predicted_subject", pa.string()),
@@ -107,7 +113,7 @@ def save_predictions(report: dict, directory: Path, *, run_id: str) -> Path:
             pa.array([row[name] for row in records], type=data_type),
         )
     metadata = {key: value for key, value in report.items() if key != "predictions"}
-    metadata.update(run_id=run_id, generation_config=predictions[0]["generation_config"])
+    metadata.update(run_id=run_id, generation_config=report["predictions"][0]["generation_config"])
     table = table.replace_schema_metadata({b"qwen_commit": json.dumps(metadata).encode()})
     destination = directory / PREDICTIONS_FILENAME
     temporary = destination.with_suffix(".tmp")
