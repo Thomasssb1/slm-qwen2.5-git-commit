@@ -110,6 +110,27 @@ uv run python experiments/cuda/evaluate.py experiments/cuda/artifacts/vast/RUN_I
 
 Reviews must match the prediction artifact's SHA-256 and the complete ordered sample. Existing templates and prediction artifacts are preserved. If no references were approved, subset metrics are unavailable and no semantic sample is selected. Keep all reports, diffs, and review annotations in the ignored run directory; the PR can contain aggregate findings without source examples.
 
+## Judge correctness locally
+
+Open `notebooks/judge_predictions.ipynb` in the existing ROCm review kernel, or run these commands from the repository root in that kernel's Linux environment:
+
+```console
+~/.venvs/qwen-commit-review/bin/python experiments/cuda/judge.py run experiments/cuda/artifacts/vast/RUN_ID --limit 3
+~/.venvs/qwen-commit-review/bin/python experiments/cuda/judge.py run experiments/cuda/artifacts/vast/RUN_ID
+~/.venvs/qwen-commit-review/bin/python experiments/cuda/judge.py review experiments/cuda/artifacts/vast/RUN_ID
+```
+
+The first two commands generate proposals and resume remaining rows. The last collects your decisions; it needs no GPU. The project `uv` environment intentionally does not install Torch or Transformers. Use the existing ROCm kernel with Transformers 5.13.1 or a compatible version supporting Qwen3 and chunked prefill. No packages in the CUDA image need changing.
+
+The judge uses `Qwen/Qwen3-4B-Instruct-2507` at revision `cdbee75f17c01a7cc42f958dc650907174af0554` in BF16, with greedy decoding and 512 output tokens. It assesses every approved-reference validation row, sorted by ID, including formatting failures. It receives the full diff and raw prediction, without the reference, generator identity, or previous ratings. It reuses the existing `accurate`/`partial`/`incorrect`/`uncertain` rubric; a material unsupported claim is incorrect. The 8,192-token prompt budget bounds local memory use. Larger prompts, invalid JSON, and unfinished responses require manual review; evidence is never silently truncated. Generator input truncation remains visible to the reviewer.
+
+`correctness-judge.json` records raw responses, evidence rationales, the pinned model, prompt, generation settings, runtime, and prediction hash after each row. Resume rejects changed source data, settings, runtime, or cohort. `correctness-human-review.json` stores named human decisions separately. Both are private files in the ignored run directory. `correctness-summary.json` separates judge estimates from human scores:
+
+- **Correctness:** accurate subjects divided by all approved validation rows.
+- **Usable output:** subjects that are both accurate and format-valid divided by the same cohort.
+
+Rates are unavailable while that grader has pending or uncertain rows; these rows stay in the denominator. Review all proposals before treating the human score as a correctness baseline. This score applies to the fixed approved subset, not the full split. Use the same cohort, rubric, and judge configuration for future comparisons, and compare human-reviewed runs with human-reviewed runs. The model judge can be wrong, including when its rationale sounds convincing.
+
 ## One-command Vast smoke test
 
 Requires a funded Vast account, Terraform < 2.0, AWS credentials with S3 access,

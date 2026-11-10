@@ -199,7 +199,8 @@ def render_markdown(result: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def evaluate(directory: Path, review_path: Path | None = None) -> dict:
+def load_predictions(directory: Path) -> tuple[dict, list[dict], dict]:
+    """Read predictions only after verifying the saved generation report and local join."""
     report = validate_report(directory / "validation.json", check="validation")
     predictions = directory / PREDICTIONS_FILENAME
     table = pq.read_table(predictions)
@@ -207,7 +208,12 @@ def evaluate(directory: Path, review_path: Path | None = None) -> dict:
     if rows != join_predictions(report, directory):
         raise ValueError("Saved predictions differ from the validated report and local references.")
     metadata = json.loads(table.schema.metadata[b"qwen_commit"])
-    digest = file_sha256(predictions)
+    return report, rows, metadata
+
+
+def evaluate(directory: Path, review_path: Path | None = None) -> dict:
+    report, rows, metadata = load_predictions(directory)
+    digest = file_sha256(directory / PREDICTIONS_FILENAME)
     template = review_template(rows, digest)
     result = {
         "run_id": metadata["run_id"],
