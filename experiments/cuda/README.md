@@ -51,7 +51,7 @@ For the optional 12-example audit, copy `semantic-review-template.json` to `sema
 
 ## Judge correctness locally
 
-Open [judge_predictions.ipynb](../../notebooks/judge_predictions.ipynb) in the **Qwen Commit Review (ROCm)** kernel. Set `run_directory` and execute the blocks in order. Use `row_limit = 3` for a short first run, or `None` for all remaining examples.
+Open [judge_predictions.ipynb](../../notebooks/judge_predictions.ipynb) in the **Qwen Commit Review (ROCm)** kernel.
 
 The pinned Qwen3-4B judge assesses every approved validation example. Oversized prompts and invalid responses are deferred for manual review. To review saved proposals without loading the GPU, run the setup blocks through **Calculate correctness and usable output**, then jump to **Review each verdict**.
 
