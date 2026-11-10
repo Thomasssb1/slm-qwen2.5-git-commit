@@ -25,7 +25,7 @@ The runner builds and pushes the image, rents a GPU, collects results, then remo
 
 Defaults: RTX 3090 or RTX PRO 4000, at most **$0.50/hour** including storage, and a **60-minute** execution timeout. Override these with `--gpu`, `--max-hourly-price`, and `--timeout-minutes`. See `uv run python experiments/cuda/run.py --help` for all options.
 
-Model revisions and dependencies are pinned in [model_spec.py](model_spec.py) and [requirements.txt](requirements.txt). Inference uses the [commit-subject prompt](commit_subject_prompt.txt), greedy decoding, the first 4,096 diff tokens, and up to 64 output tokens. Subjects must pass the one-line, 72-character format check; invalid outputs are retained without repair.
+Model revisions and dependencies are pinned in [model_spec.py](model_spec.py) and [requirements.txt](requirements.txt).
 
 ## Run the validation split
 
@@ -34,6 +34,8 @@ uv run python experiments/cuda/run.py --check validation --reviewed-validation n
 ```
 
 Reads `notebooks/prepared/validation.parquet`; use `--dataset PATH` to override it. The optional reviewed file marks approved references without filtering the full split. Only IDs and diffs are uploaded; reference subjects stay local. The test split is not read.
+
+Generation uses the [commit-subject prompt](commit_subject_prompt.txt), greedy decoding, the first 4,096 diff tokens, and up to 64 output tokens. Subjects must pass the one-line, 72-character format check; invalid outputs are retained without repair.
 
 Results include `validation-predictions.parquet` with joined predictions, diffs, and references, plus `validation.json` with raw results and generation settings. Keep the run directory intact for evaluation.
 
