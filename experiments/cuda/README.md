@@ -112,15 +112,11 @@ Reviews must match the prediction artifact's SHA-256 and the complete ordered sa
 
 ## Judge correctness locally
 
-Open `notebooks/judge_predictions.ipynb` in the existing ROCm review kernel, or run these commands from the repository root in that kernel's Linux environment:
+Open `notebooks/judge_predictions.ipynb` in the existing **Qwen Commit Review (ROCm)** kernel. Set `run_directory` to the completed validation run and execute the blocks in order. Use `row_limit = 3` for a short first run; set it to `None` and rerun **Resume and save the judging run** to finish the cohort.
 
-```console
-~/.venvs/qwen-commit-review/bin/python experiments/cuda/judge.py run experiments/cuda/artifacts/vast/RUN_ID --limit 3
-~/.venvs/qwen-commit-review/bin/python experiments/cuda/judge.py run experiments/cuda/artifacts/vast/RUN_ID
-~/.venvs/qwen-commit-review/bin/python experiments/cuda/judge.py review experiments/cuda/artifacts/vast/RUN_ID
-```
+The notebook contains the prompt, response validation, model loading, inference, checkpoint checks, scoring, and review loops. Only the existing baseline input checks, rubric, hashing, and atomic JSON writer are shared imports. When returning for human review, run the setup/helper blocks through **Calculate correctness and usable output**, then jump to **Review each verdict**; this needs no GPU.
 
-The first two commands generate proposals and resume remaining rows. The last collects your decisions; it needs no GPU. The project `uv` environment intentionally does not install Torch or Transformers. Use the existing ROCm kernel with Transformers 5.13.1 or a compatible version supporting Qwen3 and chunked prefill. No packages in the CUDA image need changing.
+The project `uv` environment intentionally does not install Torch or Transformers. Use the existing ROCm kernel with Transformers 5.13.1 or a compatible version supporting Qwen3 and chunked prefill.
 
 The judge uses `Qwen/Qwen3-4B-Instruct-2507` at revision `cdbee75f17c01a7cc42f958dc650907174af0554` in BF16, with greedy decoding and 512 output tokens. It assesses every approved-reference validation row, sorted by ID, including formatting failures. It receives the full diff and raw prediction, without the reference, generator identity, or previous ratings. It reuses the existing `accurate`/`partial`/`incorrect`/`uncertain` rubric; a material unsupported claim is incorrect. The 8,192-token prompt budget bounds local memory use. Larger prompts, invalid JSON, and unfinished responses require manual review; evidence is never silently truncated. Generator input truncation remains visible to the reviewer.
 

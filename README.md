@@ -60,7 +60,7 @@ The GPU kernel and its model cache are review-only local tooling; neither is par
 
 After a [Vast validation run](experiments/cuda/README.md#run-the-validation-split), open `notebooks/judge_predictions.ipynb` in the existing **Qwen Commit Review (ROCm)** kernel. Select the saved run directory to judge every approved validation reference with a pinned local [Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507) model, then review its proposals against the diffs. This downloads about 8 GB of public weights; private data stays local.
 
-Judgments resume from saved progress. Human decisions are stored separately, and correctness rates remain unavailable until the relevant grader resolves every selected example. See [local correctness evaluation](experiments/cuda/README.md#judge-correctness-locally) for commands and scoring details.
+The notebook shows the prompt, model loading, generation, resume loop, scoring, and human review in separate blocks. Judgments resume from saved progress. Human decisions are stored separately, and correctness rates remain unavailable until the relevant grader resolves every selected example. See [local correctness evaluation](experiments/cuda/README.md#judge-correctness-locally) for usage and scoring details.
 
 ## Output contract
 
