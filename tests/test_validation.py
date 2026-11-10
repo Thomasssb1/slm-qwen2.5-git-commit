@@ -320,6 +320,39 @@ def test_validation_lifecycle_uploads_only_inputs_saves_complete_predictions_and
     assert state["cleanup"] == "complete"
 
 
+def test_large_validation_result_retains_all_predictions_after_cleanup(tmp_path):
+    source = tmp_path / "validation.parquet"
+    rows = [
+        {"id": f"row-{index}", "subject": f"Reference {index}", "diff": f"+change {index}"}
+        for index in range(3000)
+    ]
+    pq.write_table(pa.Table.from_pylist(rows), source)
+    cloud = {"resources": set(), "tracked": set(), "rentals": 0, "uploaded": []}
+
+    output = runner.run_smoke(
+        source,
+        gpu_names=["RTX 3090"],
+        max_hourly_price=0.5,
+        timeout_minutes=60,
+        check="validation",
+        runs_directory=tmp_path / "runs",
+        commands_type=lambda directory: FakeTools(directory, cloud),
+        transfer_type=lambda region: fake_transfer(cloud),
+    )
+
+    envelope = json.loads((output.parent / "result.json").read_text())
+    assert len(json.dumps(envelope).encode()) > 2 * 1024 * 1024
+    table = pq.read_table(output)
+    assert table["id"].to_pylist() == [row["id"] for row in rows]
+    assert table["diff"].to_pylist() == [row["diff"] for row in rows]
+    assert table["reference_subject"].to_pylist() == [row["subject"] for row in rows]
+    assert table["predicted_subject"].to_pylist() == ["Trim whitespace from names"] * len(rows)
+    assert cloud["resources"] == set()
+    assert cloud["objects"] == {}
+    assert saved_run(tmp_path)["outcome"] == "passed"
+    assert saved_run(tmp_path)["cleanup"] == "complete"
+
+
 def test_cli_validation_defaults_to_validation_split(tmp_path, split, monkeypatch):
     prepared = tmp_path / "notebooks/prepared"
     prepared.mkdir(parents=True)
