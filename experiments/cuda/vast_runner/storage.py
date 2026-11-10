@@ -2,6 +2,8 @@
 
 import hashlib
 import json
+import shutil
+import tempfile
 import time
 from pathlib import Path
 
@@ -64,10 +66,17 @@ class Transfer:
                 time.sleep(min(5, max(0, deadline - time.monotonic())))
                 continue
             with response["Body"] as body:
-                payload = body.read(2 * 1024 * 1024 + 1)
-            if len(payload) > 2 * 1024 * 1024:
-                raise RunError("The container returned an oversized result.")
-            result = json.loads(payload)
+                if check == "validation":
+                    # Full-split reports grow with the dataset, unlike smoke checks.
+                    with tempfile.TemporaryFile(dir=directory) as payload:
+                        shutil.copyfileobj(body, payload)
+                        payload.seek(0)
+                        result = json.load(payload)
+                else:
+                    payload = body.read(2 * 1024 * 1024 + 1)
+                    if len(payload) > 2 * 1024 * 1024:
+                        raise RunError("The container returned an oversized result.")
+                    result = json.loads(payload)
             if not isinstance(result, dict) or result.get("run_id") != run_id:
                 raise RunError("The container result does not belong to this run.")
             write_json(directory / "result.json", result)

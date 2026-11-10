@@ -121,20 +121,31 @@ def test_access_denied_does_not_wait_until_timeout(tmp_path, transfer):
 
 
 @pytest.mark.parametrize(
-    "payload, message",
+    "payload, message, check",
     [
-        (b"x" * (2 * 1024 * 1024 + 1), "oversized"),
-        (b"[]", "does not belong"),
-        (b'{"run_id":"different"}', "does not belong"),
-        (b'{"run_id":"run-id","outcome":"passed"}', "does not prove"),
+        (b"x" * (2 * 1024 * 1024 + 1), "oversized", "cuda"),
+        (b"[]", "does not belong", "cuda"),
+        (b'{"run_id":"different"}', "does not belong", "cuda"),
+        (b'{"run_id":"run-id","outcome":"passed"}', "does not prove", "cuda"),
+        (b"[]", "does not belong", "validation"),
+        (b'{"run_id":"different"}', "does not belong", "validation"),
+        (b'{"run_id":"run-id","outcome":"passed"}', "does not prove", "validation"),
     ],
-    ids=["oversized", "wrong-shape", "wrong-run", "missing-report"],
+    ids=[
+        "oversized",
+        "wrong-shape",
+        "wrong-run",
+        "missing-report",
+        "validation-wrong-shape",
+        "validation-wrong-run",
+        "validation-missing-report",
+    ],
 )
-def test_invalid_remote_results_cannot_pass(tmp_path, transfer, payload, message):
+def test_invalid_remote_results_cannot_pass(tmp_path, transfer, payload, message, check):
     with Stubber(transfer.client) as stub:
         stub.add_response("get_object", {"Body": io.BytesIO(payload)})
         with pytest.raises(RunError, match=message):
-            transfer.collect("test-bucket", tmp_path, "run-id", float("inf"))
+            transfer.collect("test-bucket", tmp_path, "run-id", float("inf"), check=check)
 
 
 @pytest.fixture
