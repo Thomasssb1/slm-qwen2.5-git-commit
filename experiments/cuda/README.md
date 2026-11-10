@@ -60,6 +60,36 @@ prompt text/hash, full generation configuration, and generation time alongside
 the model-load evidence. A format failure is a recorded model result, while
 runtime errors, inconsistent reports, or a repeatability failure fail the run.
 
+## Run the validation split
+
+```console
+uv run python experiments/cuda/run.py --check validation --reviewed-validation notebooks/prepared/reviewed_validation.parquet
+```
+
+This reads every row of `notebooks/prepared/validation.parquet` in its saved
+order, loads the pinned model once, and calls the same single-diff generation
+function once per row. `--dataset PATH` can select another prepared validation
+file. The test split is not opened. The optional `--reviewed-validation` file
+marks approved references without filtering the full split; its IDs, subjects,
+and diffs must match the selected validation data. Without it, review status is
+recorded as unknown.
+
+Only IDs and diffs are uploaded. Reference subjects, approval flags, and source
+provenance stay local. Each private run directory contains:
+
+- `validation-input.parquet`: the exact uploaded IDs and diffs, with source metadata removed.
+- `validation-references.parquet`: local reference subjects and approval flags.
+- `validation.json`: model diagnostics and every raw generation result, including the full prompt/configuration.
+- `validation-predictions.parquet`: predictions joined to local diffs and references, with raw output, accepted subject or null, format errors, token counts, truncation, and timing.
+- `run.json`: source/input/reviewed-file hashes, row counts, image digest, and cleanup status.
+
+Collection verifies the input hash and complete ordered ID list before writing
+the joined Parquet file. Format violations remain recorded predictions; runtime
+failures or incomplete results fail the run. The existing 2 MiB result-envelope
+limit applies. Prediction artifacts remain gitignored, and the rental and
+temporary bucket are removed after collection. Compliance summaries and semantic
+review are separate from this prediction-generation step.
+
 ## One-command Vast smoke test
 
 Requires a funded Vast account, Terraform < 2.0, AWS credentials with S3 access,
@@ -89,7 +119,8 @@ including storage, with a 60-minute execution timeout.
 - `--gpu NAME`: replace the default GPU allowlist; repeat for multiple models.
 - `--max-hourly-price USD`: set the maximum hourly price, including storage.
 - `--timeout-minutes N`: set the rental execution timeout.
-- `--dataset PATH`: use a different training Parquet file.
+- `--dataset PATH`: use a different prepared training or validation Parquet file for the selected check.
+- `--reviewed-validation PATH`: mark an approved reference subset for a validation run.
 - `--image-repository REPO`: change the registry repository; also accepts `VAST_IMAGE_REPOSITORY`.
 - `--aws-region REGION`: choose the bucket region; defaults to the AWS configuration or `eu-west-2`.
 

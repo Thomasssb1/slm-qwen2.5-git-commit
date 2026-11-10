@@ -8,3 +8,5 @@
 !generation.py
 !inference_smoke.py
 !commit_subject_prompt.txt
+!validation_data.py
+!validation_inference.py

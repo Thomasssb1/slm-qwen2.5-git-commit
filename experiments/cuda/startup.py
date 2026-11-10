@@ -11,12 +11,23 @@ import urllib.request
 from pathlib import Path
 
 CHECKS = {
-    "cuda": {"script": "smoke_test.py", "report": "cuda-smoke.json", "timeout": 300},
+    "cuda": {
+        "script": "smoke_test.py",
+        "report": "cuda-smoke.json",
+        "timeout": 300,
+        "dataset": "train.parquet",
+    },
     "model": {"script": "model_load.py", "report": "model-load.json", "timeout": 1800},
     "inference": {
         "script": "inference_smoke.py",
         "report": "inference-smoke.json",
         "timeout": 1800,
+    },
+    "validation": {
+        "script": "validation_inference.py",
+        "report": "validation.json",
+        "timeout": 1800,
+        "dataset": "validation.parquet",
     },
 }
 
@@ -24,7 +35,7 @@ CHECKS = {
 def execute(
     job: dict,
     *,
-    sample: Path = Path("/datasets/train.parquet"),
+    sample: Path | None = None,
     report: Path | None = None,
     command: list[str] | None = None,
 ) -> dict:
@@ -33,13 +44,14 @@ def execute(
         check = job.get("check", "cuda")
         if check not in CHECKS:
             raise ValueError("Unknown check")
-        if check == "cuda":
+        settings = CHECKS[check]
+        if "dataset" in settings:
+            sample = sample if sample is not None else Path("/datasets") / settings["dataset"]
             with urllib.request.urlopen(job["sample_url"], timeout=60) as response:
                 data = response.read()
             if hashlib.sha256(data).hexdigest() != job["sample_sha256"]:
                 raise ValueError("Sample checksum mismatch")
             sample.write_bytes(data)
-        settings = CHECKS[check]
         if report is None:
             report = Path("/artifacts") / settings["report"]
         report.unlink(missing_ok=True)

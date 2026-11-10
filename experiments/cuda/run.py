@@ -26,10 +26,17 @@ def main(argv: list[str] | None = None) -> int:
         "--check",
         choices=tuple(CHECKS),
         default="cuda",
-        help="Check CUDA, load Qwen, or generate subjects from synthetic diffs.",
+        help="Check CUDA, load Qwen, or generate subjects for synthetic/validation diffs.",
     )
     parser.add_argument(
-        "--dataset", type=Path, default=PROJECT_DIRECTORY / "notebooks/prepared/train.parquet"
+        "--dataset",
+        type=Path,
+        help="Prepared Parquet input; defaults to validation.parquet for validation, else train.parquet.",
+    )
+    parser.add_argument(
+        "--reviewed-validation",
+        type=Path,
+        help="Optional approved validation subset to flag in the local predictions; never uploaded.",
     )
     parser.add_argument(
         "--gpu",
@@ -50,6 +57,13 @@ def main(argv: list[str] | None = None) -> int:
         "--cleanup", type=Path, help="Retry teardown for an existing run directory."
     )
     arguments = parser.parse_args(argv)
+    if arguments.reviewed_validation is not None and arguments.check != "validation":
+        parser.error("Use --reviewed-validation only with --check validation.")
+    dataset = arguments.dataset or (
+        PROJECT_DIRECTORY
+        / "notebooks/prepared"
+        / CHECKS[arguments.check].get("dataset", CHECKS["cuda"]["dataset"])
+    )
     gpu_names = arguments.gpu_names if arguments.gpu_names is not None else DEFAULT_GPU_NAMES
     if any(not name.strip() for name in gpu_names):
         parser.error("Provide at least one nonblank GPU model name.")
@@ -64,13 +78,14 @@ def main(argv: list[str] | None = None) -> int:
             recover(arguments.cleanup)
         else:
             report = run_smoke(
-                arguments.dataset.resolve(),
+                dataset.resolve(),
                 gpu_names=gpu_names,
                 max_hourly_price=arguments.max_hourly_price,
                 timeout_minutes=arguments.timeout_minutes,
                 image_repository=arguments.image_repository,
                 aws_region=arguments.aws_region,
                 check=arguments.check,
+                reviewed_validation=arguments.reviewed_validation,
             )
             print(f"{arguments.check.capitalize()} check passed. Report: {report}")
     except KeyboardInterrupt:

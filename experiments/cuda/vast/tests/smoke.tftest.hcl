@@ -226,3 +226,34 @@ run "reject_cuda_without_sample" {
   }
   expect_failures = [var.job]
 }
+
+run "validation_with_input" {
+  command = plan
+  variables {
+    job = {
+      run_id        = "validation-test"
+      check         = "validation"
+      sample_sha256 = "input-checksum"
+      sample_url    = "https://example.invalid/validation-input.parquet"
+      result_url    = "https://example.invalid/result"
+      hold_seconds  = 3000
+    }
+  }
+  assert {
+    condition     = jsondecode(vastai_instance.smoke[0].args[1]).check == "validation" && jsondecode(vastai_instance.smoke[0].args[1]).sample_url == var.job.sample_url
+    error_message = "Pass validation mode and its scoped input transfer through to the container."
+  }
+}
+
+run "reject_validation_without_input" {
+  command = plan
+  variables {
+    job = {
+      run_id       = "bad-validation-test"
+      check        = "validation"
+      result_url   = "https://example.invalid/result"
+      hold_seconds = 3000
+    }
+  }
+  expect_failures = [var.job]
+}

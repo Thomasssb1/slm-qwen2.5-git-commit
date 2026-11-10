@@ -9,6 +9,7 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from startup import CHECKS
+from validation_data import save_predictions
 
 from . import RunError
 from .artifacts import validate_report, write_json
@@ -44,10 +45,10 @@ class Transfer:
         }
         if sample is not None:
             data = sample.read_bytes()
-            self.client.put_object(Bucket=bucket, Key="train.parquet", Body=data)
+            self.client.put_object(Bucket=bucket, Key=sample.name, Body=data)
             job["sample_sha256"] = hashlib.sha256(data).hexdigest()
             job["sample_url"] = self.client.generate_presigned_url(
-                "get_object", Params={"Bucket": bucket, "Key": "train.parquet"}, ExpiresIn=seconds
+                "get_object", Params={"Bucket": bucket, "Key": sample.name}, ExpiresIn=seconds
             )
         return job
 
@@ -75,7 +76,9 @@ class Transfer:
                 raise RunError(f"The container smoke test failed; see {directory / 'smoke.log'}")
             report = directory / CHECKS[check]["report"]
             write_json(report, result.get("report"))
-            validate_report(report, check=check)
+            validated = validate_report(report, check=check)
+            if check == "validation":
+                return save_predictions(validated, directory, run_id=run_id)
             return report
         raise RunError("The container did not return a result within the rental time limit.")
 

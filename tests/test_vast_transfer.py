@@ -47,8 +47,9 @@ def transfer(monkeypatch):
     return storage.Transfer("eu-west-2")
 
 
-def test_prepare_uploads_sample_and_signs_only_its_get_and_result_put(tmp_path, transfer):
-    sample = tmp_path / "train.parquet"
+@pytest.mark.parametrize("filename", ["train.parquet", "validation-input.parquet"])
+def test_prepare_uploads_sample_and_signs_only_its_get_and_result_put(tmp_path, transfer, filename):
+    sample = tmp_path / filename
     sample.write_bytes(b"one private row")
     with Stubber(transfer.client) as stub:
         stub.add_response(
@@ -56,14 +57,14 @@ def test_prepare_uploads_sample_and_signs_only_its_get_and_result_put(tmp_path, 
             {},
             {
                 "Bucket": "test-bucket",
-                "Key": "train.parquet",
+                "Key": filename,
                 "Body": sample.read_bytes(),
             },
         )
         job = transfer.prepare("test-bucket", sample, "run-id", 3900)
         stub.assert_no_pending_responses()
     assert job["sample_sha256"] == hashlib.sha256(sample.read_bytes()).hexdigest()
-    for key, path in (("sample_url", "/train.parquet"), ("result_url", "/result.json")):
+    for key, path in (("sample_url", "/" + filename), ("result_url", "/result.json")):
         url = urlparse(job[key])
         query = parse_qs(url.query)
         assert url.scheme == "https"
@@ -175,8 +176,9 @@ def http_transfer():
 @pytest.mark.parametrize(
     "failure", [None, "cuda", "checksum", "download", "missing-report", "upload"]
 )
+@pytest.mark.parametrize("check", ["cuda", "validation"])
 def test_container_downloads_runs_and_uploads_outcome_then_exits_after_hold(
-    tmp_path, http_transfer, monkeypatch, failure
+    tmp_path, http_transfer, monkeypatch, failure, check
 ):
     sample = tmp_path / "train.parquet"
     report = tmp_path / "report.json"
@@ -201,6 +203,7 @@ def test_container_downloads_runs_and_uploads_outcome_then_exits_after_hold(
     http_transfer["put_failures"] = 3 if failure == "upload" else 1
     job = {
         "run_id": "fixture-run",
+        "check": check,
         "sample_url": http_transfer["url"] + "/sample?secret=do-not-log",
         "sample_sha256": "wrong"
         if failure == "checksum"
@@ -235,7 +238,8 @@ def test_container_downloads_runs_and_uploads_outcome_then_exits_after_hold(
 
 
 @pytest.mark.parametrize(
-    "check, expected_timeout", [("cuda", 300), ("model", 1800), ("inference", 1800)]
+    "check, expected_timeout",
+    [("cuda", 300), ("model", 1800), ("inference", 1800), ("validation", 1800)],
 )
 def test_container_reports_subprocess_timeout(
     http_transfer, tmp_path, monkeypatch, check, expected_timeout

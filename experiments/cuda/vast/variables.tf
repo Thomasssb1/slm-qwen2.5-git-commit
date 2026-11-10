@@ -34,8 +34,8 @@ variable "job" {
   default   = null
 
   validation {
-    condition     = var.job == null ? true : contains(["cuda", "model", "inference"], var.job.check) && (var.job.check != "cuda" || (var.job.sample_url != null && var.job.sample_sha256 != null))
-    error_message = "Choose cuda with a sample URL and checksum, or model/inference without a dataset."
+    condition     = var.job == null ? true : contains(["cuda", "model", "inference", "validation"], var.job.check) && (!contains(["cuda", "validation"], var.job.check) || (var.job.sample_url != null && var.job.sample_sha256 != null))
+    error_message = "Choose cuda/validation with an input URL and checksum, or model/inference without a dataset."
   }
 }
 

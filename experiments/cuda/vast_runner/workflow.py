@@ -10,6 +10,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from startup import CHECKS
+from validation_data import INPUT_FILENAME, prepare_validation
 
 from . import RunError
 from .artifacts import RUNS_DIRECTORY, training_sample, write_json
@@ -28,12 +29,13 @@ def run_smoke(
     image_repository: str = "ghcr.io/thomasssb1/qwen-commit-cuda",
     aws_region: str | None = None,
     check: str = "cuda",
+    reviewed_validation: Path | None = None,
     runs_directory: Path = RUNS_DIRECTORY,
     commands_type=Commands,
     transfer_type=Transfer,
 ) -> Path:
     if check not in CHECKS:
-        raise ValueError("Choose the cuda, model, or inference check.")
+        raise ValueError("Choose the cuda, model, inference, or validation check.")
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:12]
     directory = (runs_directory / run_id).resolve()
     directory.mkdir(parents=True, mode=0o700)
@@ -53,6 +55,10 @@ def run_smoke(
     if check == "cuda":
         sample = directory / "train.parquet"
         training_sample(dataset, sample)
+    elif check == "validation":
+        state["dataset"] = prepare_validation(dataset, directory, reviewed_validation)
+        sample = directory / INPUT_FILENAME
+        write_json(directory / "run.json", state)
     transfer = transfer_type(aws_region)
     commands.run(["terraform", "version"])
     commands.run(["docker", "info"])

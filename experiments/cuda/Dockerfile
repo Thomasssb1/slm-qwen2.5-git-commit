@@ -31,6 +31,7 @@ COPY smoke_test.py /opt/qwen-commit/smoke_test.py
 COPY startup.py /opt/qwen-commit/startup.py
 COPY model_load.py model_spec.py /opt/qwen-commit/
 COPY generation.py inference_smoke.py commit_subject_prompt.txt /opt/qwen-commit/
+COPY validation_data.py validation_inference.py /opt/qwen-commit/
 USER experiment
 WORKDIR /workspace
 

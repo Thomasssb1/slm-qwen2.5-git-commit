@@ -236,6 +236,20 @@ class FakeTools:
                     report = valid_model_report() if check == "model" else valid_report()
                     if check == "inference":
                         report = valid_inference_report()
+                    if check == "validation":
+                        inputs = self.directory / "validation-input.parquet"
+                        rows = pq.read_table(inputs).to_pylist()
+                        report = valid_model_report() | {
+                            "input_sha256": hashlib.sha256(inputs.read_bytes()).hexdigest(),
+                            "row_count": len(rows),
+                            "predictions": [
+                                {
+                                    "id": row["id"],
+                                    **valid_inference_report()["examples"]["single_file"],
+                                }
+                                for row in rows
+                            ],
+                        }
                     if self.failure == "report":
                         report["cuda_tensor_checksum"] = 0
                     result = {
@@ -329,7 +343,7 @@ def test_model_check_needs_no_dataset_collects_model_evidence_and_cleans_up(tmp_
 
 def test_unknown_check_fails_before_creating_run_artifacts(tmp_path):
     invoke, cloud = invoke_fake(tmp_path, tmp_path / "missing", check="unknown")
-    with pytest.raises(ValueError, match="cuda, model, or inference"):
+    with pytest.raises(ValueError, match="cuda, model, inference, or validation"):
         invoke()
     assert not (tmp_path / "runs").exists()
     assert cloud["rentals"] == 0
