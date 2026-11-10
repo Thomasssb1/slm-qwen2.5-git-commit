@@ -33,23 +33,23 @@ CHECKS = {
 
 
 def execute(
-    job: dict,
+    run_config: dict,
     *,
     sample: Path | None = None,
     report: Path | None = None,
     command: list[str] | None = None,
 ) -> dict:
-    result = {"run_id": job["run_id"], "outcome": "failed", "log": ""}
+    result = {"run_id": run_config["run_id"], "outcome": "failed", "log": ""}
     try:
-        check = job.get("check", "cuda")
+        check = run_config.get("check", "cuda")
         if check not in CHECKS:
             raise ValueError("Unknown check")
         settings = CHECKS[check]
         if "dataset" in settings:
             sample = sample if sample is not None else Path("/datasets") / settings["dataset"]
-            with urllib.request.urlopen(job["sample_url"], timeout=60) as response:
+            with urllib.request.urlopen(run_config["sample_url"], timeout=60) as response:
                 data = response.read()
-            if hashlib.sha256(data).hexdigest() != job["sample_sha256"]:
+            if hashlib.sha256(data).hexdigest() != run_config["sample_sha256"]:
                 raise ValueError("Sample checksum mismatch")
             sample.write_bytes(data)
         if report is None:
@@ -71,15 +71,15 @@ def execute(
             result["outcome"] = "passed"
     except Exception as error:
         # Exceptions from HTTP clients can include the signed URL; never print it.
-        result["log"] += f"\nSmoke job failed: {type(error).__name__}"
+        result["log"] += f"\nContainer run failed: {type(error).__name__}"
     return result
 
 
-def main(job: dict) -> int:
-    deadline = time.monotonic() + job["hold_seconds"]
-    result = execute(job)
+def main(run_config: dict) -> int:
+    deadline = time.monotonic() + run_config["hold_seconds"]
+    result = execute(run_config)
     request = urllib.request.Request(
-        job["result_url"],
+        run_config["result_url"],
         data=json.dumps(result).encode(),
         headers={"Content-Type": "application/json"},
         method="PUT",

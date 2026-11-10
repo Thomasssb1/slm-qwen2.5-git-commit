@@ -232,7 +232,7 @@ class FakeTools:
                         self.cloud["rentals"] += 1
                         if self.failure != "untracked-create":
                             self.cloud["tracked"].add("container")
-                    check = variables["job"]["check"]
+                    check = variables["run_config"]["check"]
                     report = valid_model_report() if check == "model" else valid_report()
                     if check == "inference":
                         report = valid_inference_report()
@@ -253,7 +253,7 @@ class FakeTools:
                     if self.failure == "report":
                         report["cuda_tensor_checksum"] = 0
                     result = {
-                        "run_id": variables["job"]["run_id"],
+                        "run_id": variables["run_config"]["run_id"],
                         "outcome": "failed" if self.failure == "smoke" else "passed",
                         "report": report,
                         "log": "CUDA subprocess output",
@@ -335,10 +335,12 @@ def test_model_check_needs_no_dataset_collects_model_evidence_and_cleans_up(tmp_
     assert state["cleanup"] == "complete"
     directory = next((tmp_path / "runs").iterdir())
     assert not (directory / "train.parquet").exists()
-    job = json.loads((directory / "terraform/run.auto.tfvars.json").read_text())["job"]
-    assert job["check"] == "model"
-    assert "sample_url" not in job
-    assert "sample_sha256" not in job
+    run_config = json.loads((directory / "terraform/run.auto.tfvars.json").read_text())[
+        "run_config"
+    ]
+    assert run_config["check"] == "model"
+    assert "sample_url" not in run_config
+    assert "sample_sha256" not in run_config
 
 
 def test_unknown_check_fails_before_creating_run_artifacts(tmp_path):

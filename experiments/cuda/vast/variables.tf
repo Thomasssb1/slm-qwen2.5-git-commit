@@ -4,7 +4,7 @@ variable "aws_region" {
 }
 
 variable "launch" {
-  description = "Create storage first; launch after the runner prepares the transfer job."
+  description = "Create storage first; launch after the runner prepares the container run configuration."
   type        = bool
   default     = false
 }
@@ -21,7 +21,7 @@ variable "image_login" {
   default     = null
 }
 
-variable "job" {
+variable "run_config" {
   type = object({
     run_id        = string
     check         = optional(string, "cuda")
@@ -34,7 +34,7 @@ variable "job" {
   default   = null
 
   validation {
-    condition     = var.job == null ? true : contains(["cuda", "model", "inference", "validation"], var.job.check) && (!contains(["cuda", "validation"], var.job.check) || (var.job.sample_url != null && var.job.sample_sha256 != null))
+    condition     = var.run_config == null ? true : contains(["cuda", "model", "inference", "validation"], var.run_config.check) && (!contains(["cuda", "validation"], var.run_config.check) || (var.run_config.sample_url != null && var.run_config.sample_sha256 != null))
     error_message = "Choose cuda/validation with an input URL and checksum, or model/inference without a dataset."
   }
 }
