@@ -102,6 +102,22 @@ uv run python experiments/cuda/run.py --cleanup PATH_TO_RUN_DIRECTORY
 If provisioning was interrupted, check Vast and S3 for leftovers named
 `qwen-cuda-...` from the run. Keep the runner open until teardown finishes.
 
+Transient Vast status-request timeouts, disconnected reads, rate limits, and
+selected server errors get up to three recovery attempts, with 10/20/30-second
+delays within the existing execution or cleanup deadline. After a readiness
+poll fails, Terraform's `apply -refresh-only` reads the existing rental and
+recovers its outputs. The runner then checks its price and waits for the validated
+container report. It never repeats the rental-creation apply. Teardown retries
+refresh/destroy and still requires empty Terraform state before confirming cleanup.
+Authentication, configuration, host startup, and ambiguous creation failures
+remain failures; the private per-operation JSON logs retain every attempt.
+
+The polling regression can also exercise the pinned provider against a local
+HTTP server. Set `VASTAI_TEST_PLUGIN_DIR` to an existing Terraform
+`.terraform/providers` directory, then run `uv run pytest tests/test_vast_polling.py`.
+This test uses no cloud resources or credentials. Without the provider directory,
+only this integration test is skipped; the other polling tests still run.
+
 ## Rental-GPU smoke test
 
 Run this only on a machine with a compatible NVIDIA driver, Docker Engine, and NVIDIA Container Toolkit. The smoke test does not download Qwen or perform model inference. It reads one batch from `train.parquet`, verifies the requested GPU is usable with a CUDA tensor operation, prints diagnostics, and writes `cuda-smoke.json` to the artifact directory.

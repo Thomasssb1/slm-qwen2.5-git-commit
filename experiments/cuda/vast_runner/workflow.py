@@ -16,7 +16,7 @@ from .artifacts import RUNS_DIRECTORY, training_sample, write_json
 from .commands import Commands
 from .image import publish
 from .storage import Transfer
-from .terraform import cleanup, terraform
+from .terraform import apply_or_destroy, cleanup, terraform
 
 
 def run_smoke(
@@ -80,12 +80,9 @@ def run_smoke(
         # Reset before each apply: a lost creation response can leave untracked resources.
         state["apply_complete"] = False
         write_json(directory / "run.json", state)
-        terraform(
+        apply_or_destroy(
             commands,
             "apply",
-            "-auto-approve",
-            "-input=false",
-            "-no-color",
             timeout=deadline - time.monotonic(),
         )
         state["apply_complete"] = True

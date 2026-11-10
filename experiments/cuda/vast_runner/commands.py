@@ -12,6 +12,14 @@ from pathlib import Path
 from . import RunError
 
 
+class CommandError(RunError):
+    """A nonzero exit with the captured output available for structured diagnostics."""
+
+    def __init__(self, message: str, output: str):
+        super().__init__(message)
+        self.output = output
+
+
 class Commands:
     """Run tools with bounded waits and private, per-operation logs."""
 
@@ -95,5 +103,5 @@ class Commands:
             output = log_path.read_text(encoding="utf-8", errors="replace")
         if check and process.returncode:
             detail = f"see {log_path}" if log_saved else "command log could not be saved"
-            raise RunError(f"{Path(arguments[0]).name} failed; {detail}")
+            raise CommandError(f"{Path(arguments[0]).name} failed; {detail}", output)
         return subprocess.CompletedProcess(arguments, process.returncode, output, "")

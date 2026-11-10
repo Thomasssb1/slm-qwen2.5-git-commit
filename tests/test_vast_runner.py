@@ -851,8 +851,9 @@ def test_command_logs_survive_a_later_cleanup_session(tmp_path):
 
 def test_command_failure_retains_diagnostics(tmp_path):
     commands = command_tools.Commands(tmp_path)
-    with pytest.raises(RunError, match="failed; see"):
+    with pytest.raises(command_tools.CommandError, match="failed; see") as raised:
         commands.run([sys.executable, "-c", "print('failure details'); raise SystemExit(3)"])
+    assert raised.value.output.strip() == "failure details"
     assert "failure details" in next(tmp_path.glob("*.log")).read_text()
 
 

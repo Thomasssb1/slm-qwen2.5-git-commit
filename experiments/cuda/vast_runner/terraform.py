@@ -5,13 +5,50 @@ from __future__ import annotations
 import json
 import re
 import sys
+import time
 from pathlib import Path
 
 from . import RunError
 from .artifacts import CUDA_DIRECTORY, write_json
-from .commands import Commands
+from .commands import CommandError, Commands
 
 TERRAFORM_DIRECTORY = CUDA_DIRECTORY / "vast"
+POLL_RETRIES = 3
+
+
+def _transient_poll_failure(output: str, summaries: set[str]) -> bool:
+    """Recover only known read failures, never a failed/ambiguous rent request."""
+    errors = []
+    for line in output.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            return False
+        if not isinstance(event, dict):
+            return False
+        if event.get("@level") == "error":
+            diagnostic = event.get("diagnostic", {})
+            if not isinstance(diagnostic, dict):
+                return False
+            errors.append(diagnostic)
+    if not errors:
+        return False
+    for diagnostic in errors:
+        summary = diagnostic.get("summary")
+        if not isinstance(summary, str) or summary not in summaries:
+            return False
+        detail = diagnostic.get("detail", "")
+        if not isinstance(detail, str):
+            return False
+        if not re.fullmatch(
+            r'showing instance (?P<id>\d+): (?:Get "[^"\s]+/api/v0/instances/(?P=id)/?": '
+            r"[^\n]*(?:Client\.Timeout[^\n]*|i/o timeout|TLS handshake timeout|"
+            r"connection reset[^\n]*|forcibly closed[^\n]*|\bEOF)|"
+            r"vast\.ai: [^\n]+ \(status (?:429|500|502|503|504)\))",
+            detail,
+        ):
+            return False
+    return True
 
 
 def terraform(commands: Commands, operation: str, *arguments: str, **options):
@@ -30,6 +67,46 @@ def terraform(commands: Commands, operation: str, *arguments: str, **options):
     )
 
 
+def apply_or_destroy(commands: Commands, operation: str, *, timeout: float, **options) -> None:
+    """Bounded status recovery using Terraform's own refresh and destroy operations."""
+    deadline = time.monotonic() + timeout
+    refresh_only = False
+    for attempt in range(POLL_RETRIES + 1):
+        arguments = ["-auto-approve", "-input=false", "-no-color", "-json"]
+        if refresh_only:
+            arguments.append("-refresh-only")
+        try:
+            terraform(
+                commands,
+                operation,
+                *arguments,
+                timeout=deadline - time.monotonic(),
+                **options,
+            )
+            return
+        except CommandError as error:
+            if operation == "destroy":
+                summaries = {"Error reading instance", "Error waiting for instance to be destroyed"}
+            elif refresh_only:
+                summaries = {"Error reading instance"}
+            else:
+                summaries = {"Error waiting for instance to become ready"}
+            delay = 10 * (attempt + 1)
+            if (
+                attempt == POLL_RETRIES
+                or deadline - time.monotonic() <= delay
+                or not _transient_poll_failure(error.output, summaries)
+            ):
+                raise
+            # A failed Create is tainted. Retrying normal apply would replace the
+            # already-running rental. Refresh-only reads it and updates outputs;
+            # the signed container report still has to pass before run success.
+            refresh_only = operation == "apply"
+            action = "refreshing the existing rental" if refresh_only else "retrying teardown"
+            print(f"Vast status request failed temporarily; {action} in {delay}s...", flush=True)
+            time.sleep(delay)
+
+
 def _save_cleanup_status(commands: Commands, state: dict, status: str) -> None:
     state["cleanup"] = status
     try:
@@ -43,12 +120,9 @@ def cleanup(commands: Commands, state: dict) -> None:
     _save_cleanup_status(commands, state, "pending")
     print("Destroying the rental and its temporary S3 bucket...", flush=True)
     try:
-        terraform(
+        apply_or_destroy(
             commands,
             "destroy",
-            "-auto-approve",
-            "-input=false",
-            "-no-color",
             timeout=900,
             best_effort_log=True,
         )
