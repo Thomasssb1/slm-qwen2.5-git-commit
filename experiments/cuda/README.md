@@ -1,64 +1,31 @@
-# CUDA experiment container
+# CUDA experiments
 
-This is the isolated NVIDIA CUDA environment for the base-model, SFT, and DPO work. It is separate from the rest of the project so that local development never installs CUDA or training dependencies.
+Run Qwen baseline inference on Vast and evaluate the saved predictions locally. Run commands from the repository root.
 
-## Load Qwen on a rental GPU
+## Setup
 
-With the Vast, AWS, and registry prerequisites below configured, run:
+- Docker with Linux containers, Terraform >=1.6 and <2.0, a funded Vast account, and AWS credentials with S3 access.
+- Copy [`.env.example`](../../.env.example) to `.env` in the main checkout. Set `VAST_API_KEY` and `VAST_IMAGE_LOGIN`.
+- Log Docker into GHCR with `docker login ghcr.io`. Use the same token in `VAST_IMAGE_LOGIN`, with `read:packages` and `write:packages` access.
+
+## Run a check
 
 ```console
 uv run python experiments/cuda/run.py --check model
 ```
 
-This downloads the public `Qwen/Qwen2.5-Coder-1.5B-Instruct` tokenizer and
-Safetensors weights at revision `2e1fd397ee46e1388853d2af2c993145b0f1098a`,
-using Transformers 5.22.2 in the CUDA image. It loads the full model in BF16
-onto the GPU, checks that every parameter is on CUDA, and exercises the
-tokenizer. No prepared dataset or Hugging Face token is required. This check
-does not generate subjects, evaluate the model, or train adapters.
+| `--check` | Purpose | Required data |
+| --- | --- | --- |
+| `cuda` (default) | Test GPU access with one training row | `notebooks/prepared/train.parquet` |
+| `model` | Load the pinned Qwen model in BF16 | None |
+| `inference` | Generate from synthetic diffs and check repeatability | None |
+| `validation` | Generate predictions for the full validation split | See below |
 
-The runner saves `model-load.json` and `smoke.log` under its private run
-directory, then destroys the GPU rental and temporary S3 bucket. The report
-records the model revision, library versions, parameter count, GPU placement,
-load time, and allocated/peak GPU memory. A failed or partial load fails the
-run. The container has up to 30 minutes to download and load the model, within
-the runner's overall rental timeout; the same price limit and cleanup recovery
-apply. Downloaded weights live in the rental's disposable model cache.
+The runner builds and pushes the image, rents a GPU, collects results, then removes the rental and temporary S3 bucket. The registry image is retained. Reports and logs are saved under the gitignored `experiments/cuda/artifacts/vast/RUN_ID/` directory.
 
-## Generate commit subjects
+Defaults: RTX 3090 or RTX PRO 4000, at most **$0.50/hour** including storage, and a **60-minute** execution timeout. Override these with `--gpu`, `--max-hourly-price`, and `--timeout-minutes`. See `uv run python experiments/cuda/run.py --help` for all options.
 
-```console
-uv run python experiments/cuda/run.py --check inference
-```
-
-This loads Qwen once and generates from three synthetic diffs: a single-file
-change, a change with tests in a second file, and a diff longer than the input
-budget. It repeats the first case to check token-for-token repeatability on
-the same runtime. It does not read the training, validation, or test splits.
-
-`generation.generate_subject(diff, model=model, tokenizer=tokenizer)` is the
-reusable inference function. It uses the exact system prompt in
-`commit_subject_prompt.txt`, with only the diff in the user message, and
-Qwen's pinned chat template. The first 4,096 diff tokens are retained; the
-system prompt and chat framing are not truncated. Greedy decoding uses
-`do_sample=False`, `num_beams=1`, and `max_new_tokens=64`, with the model's EOS
-tokens. These settings are explicit instead of inheriting Qwen's sampling
-defaults.
-
-The 64-token generation limit is separate from the 72-character acceptance
-limit. Results preserve the decoded response in `raw_output`. An accepted
-`subject` has surrounding spaces/tabs removed and must be nonempty, at most
-72 Unicode code points, and contain no line breaks, surrounding quotes,
-recognized Markdown, or common preambles. Responses that reach the token
-limit without EOS also fail. Invalid responses have `subject=null` and
-machine-readable `errors`; they are never clipped or rewritten. These checks
-do not assess semantic correctness or detect every possible explanation.
-
-The private `inference-smoke.json` report saves every raw response, accepted
-subject, failure reason, original/retained token counts, truncation flag,
-prompt text/hash, full generation configuration, and generation time alongside
-the model-load evidence. A format failure is a recorded model result, while
-runtime errors, inconsistent reports, or a repeatability failure fail the run.
+Model revisions and dependencies are pinned in [model_spec.py](model_spec.py) and [requirements.txt](requirements.txt). Inference uses the [commit-subject prompt](commit_subject_prompt.txt), greedy decoding, the first 4,096 diff tokens, and up to 64 output tokens. Subjects must pass the one-line, 72-character format check; invalid outputs are retained without repair.
 
 ## Run the validation split
 
@@ -66,131 +33,47 @@ runtime errors, inconsistent reports, or a repeatability failure fail the run.
 uv run python experiments/cuda/run.py --check validation --reviewed-validation notebooks/prepared/reviewed_validation.parquet
 ```
 
-This reads every row of `notebooks/prepared/validation.parquet` in its saved
-order, loads the pinned model once, and calls the same single-diff generation
-function once per row. `--dataset PATH` can select another prepared validation
-file. The test split is not opened. The optional `--reviewed-validation` file
-marks approved references without filtering the full split; its IDs, subjects,
-and diffs must match the selected validation data. Without it, review status is
-recorded as unknown.
+Reads `notebooks/prepared/validation.parquet`; use `--dataset PATH` to override it. The optional reviewed file marks approved references without filtering the full split. Only IDs and diffs are uploaded; reference subjects stay local. The test split is not read.
 
-Only IDs and diffs are uploaded. Reference subjects, approval flags, and source
-provenance stay local. Each private run directory contains:
-
-- `validation-input.parquet`: the exact uploaded IDs and diffs, with source metadata removed.
-- `validation-references.parquet`: local reference subjects and approval flags.
-- `validation.json`: model diagnostics and every raw generation result, including the full prompt/configuration.
-- `validation-predictions.parquet`: predictions joined to local diffs and references, with raw output, accepted subject or null, format errors, token counts, truncation, and timing.
-- `run.json`: source/input/reviewed-file hashes, row counts, image digest, and cleanup status.
-
-Collection verifies the input hash and complete ordered ID list before writing
-the joined Parquet file. Format violations remain recorded predictions; runtime
-failures or incomplete results fail the run. The existing 2 MiB result-envelope
-limit applies. Prediction artifacts remain gitignored, and the rental and
-temporary bucket are removed after collection. Compliance summaries and semantic
-review are separate from this prediction-generation step.
+Results include `validation-predictions.parquet` with joined predictions, diffs, and references, plus `validation.json` with raw results and generation settings. Keep the run directory intact for evaluation.
 
 ## Evaluate the baseline
-
-Run the local evaluator against a completed validation run:
 
 ```console
 uv run python experiments/cuda/evaluate.py experiments/cuda/artifacts/vast/RUN_ID
 ```
 
-It verifies the saved predictions against the validated generation report and local input/reference join, then writes private `evaluation.json` and `evaluation.md` reports. They include mechanical formatting compliance, overlapping error counts, truncation counts, and generation latency for the full validation split and the approved-reference subset. No model is loaded, no cloud service is contacted, and no test data is read.
+Writes `evaluation.json` and `evaluation.md` with formatting results and generation-only latency. Timing excludes tokenization, model loading, provisioning, and transfer. Formatting does not measure correctness.
 
-Latency is CUDA-synchronized `model.generate` time, including the first call. Median and p95 use linear interpolation. Tokenization, model loading, provisioning, and transfer are excluded; model download/load time is reported separately. A formatting pass does not establish semantic correctness or detect every possible explanation.
-
-The evaluator also writes `semantic-review-template.json` with the first 12 approved-reference rows sorted by ID, including format failures. Copy it to `semantic-review.json`, identify the reviewer, and fill each `rating` and evidence-based `rationale` using the included rubric: `accurate`, `partial`, `incorrect`, or `uncertain`. Inspect the saved diff itself; a historical reference is context, not ground truth. Truncated inputs are flagged because the model did not see the full diff. The sample is descriptive, not an estimate of full-split accuracy.
-
-```console
-uv run python experiments/cuda/evaluate.py experiments/cuda/artifacts/vast/RUN_ID --review experiments/cuda/artifacts/vast/RUN_ID/semantic-review.json
-```
-
-Reviews must match the prediction artifact's SHA-256 and the complete ordered sample. Existing templates and prediction artifacts are preserved. If no references were approved, subset metrics are unavailable and no semantic sample is selected. Keep all reports, diffs, and review annotations in the ignored run directory; the PR can contain aggregate findings without source examples.
+For the optional 12-example audit, copy `semantic-review-template.json` to `semantic-review.json`, fill in the reviewer, ratings, and rationales, then rerun the evaluator with `--review PATH_TO_REVIEW`. This sample is not an overall accuracy estimate.
 
 ## Judge correctness locally
 
-Open `notebooks/judge_predictions.ipynb` in the existing **Qwen Commit Review (ROCm)** kernel. Set `run_directory` to the completed validation run and execute the blocks in order. Use `row_limit = 3` for a short first run; set it to `None` and rerun **Resume and save the judging run** to finish the cohort.
+Open [judge_predictions.ipynb](../../notebooks/judge_predictions.ipynb) in the **Qwen Commit Review (ROCm)** kernel. Set `run_directory` and execute the blocks in order. Use `row_limit = 3` for a short first run, or `None` for all remaining examples.
 
-The notebook contains the prompt, response validation, model loading, inference, checkpoint checks, scoring, and review loops. Only the existing baseline input checks, rubric, hashing, and atomic JSON writer are shared imports. When returning for human review, run the setup/helper blocks through **Calculate correctness and usable output**, then jump to **Review each verdict**; this needs no GPU.
+The pinned Qwen3-4B judge assesses every approved validation example. Oversized prompts and invalid responses are deferred for manual review. To review saved proposals without loading the GPU, run the setup blocks through **Calculate correctness and usable output**, then jump to **Review each verdict**.
 
-The project `uv` environment intentionally does not install Torch or Transformers. Use the existing ROCm kernel with Transformers 5.13.1 or a compatible version supporting Qwen3 and chunked prefill.
+`correctness-summary.json` keeps model and human scores separate:
 
-The judge uses `Qwen/Qwen3-4B-Instruct-2507` at revision `cdbee75f17c01a7cc42f958dc650907174af0554` in BF16, with greedy decoding and 512 output tokens. It assesses every approved-reference validation row, sorted by ID, including formatting failures. It receives the full diff and raw prediction, without the reference, generator identity, or previous ratings. It reuses the existing `accurate`/`partial`/`incorrect`/`uncertain` rubric; a material unsupported claim is incorrect. The 8,192-token prompt budget bounds local memory use. Larger prompts, invalid JSON, and unfinished responses require manual review; evidence is never silently truncated. Generator input truncation remains visible to the reviewer.
+- **Correctness:** accurate subjects divided by all approved validation examples.
+- **Usable output:** subjects that are both accurate and format-valid, using the same denominator.
 
-`correctness-judge.json` records raw responses, evidence rationales, the pinned model, prompt, generation settings, runtime, and prediction hash after each row. Resume rejects changed source data, settings, runtime, or cohort. `correctness-human-review.json` stores named human decisions separately. Both are private files in the ignored run directory. `correctness-summary.json` separates judge estimates from human scores:
+Rates remain unavailable while that grader has pending or uncertain examples. Human review is required to establish the correctness baseline.
 
-- **Correctness:** accurate subjects divided by all approved validation rows.
-- **Usable output:** subjects that are both accurate and format-valid divided by the same cohort.
+## Recover interrupted runs
 
-Rates are unavailable while that grader has pending or uncertain rows; these rows stay in the denominator. Review all proposals before treating the human score as a correctness baseline. This score applies to the fixed approved subset, not the full split. Use the same cohort, rubric, and judge configuration for future comparisons, and compare human-reviewed runs with human-reviewed runs. The model judge can be wrong, including when its rationale sounds convincing.
-
-## One-command Vast smoke test
-
-Requires a funded Vast account, Terraform < 2.0, AWS credentials with S3 access,
-and `notebooks/prepared/train.parquet`. Copy `.env.example` to `.env` in the
-repository root and set `VAST_API_KEY`. The runner loads this gitignored file
-automatically; existing environment variables take precedence.
-Keep `.env` in the main checkout; `.worktreeinclude` lists it for worktree setup.
-Log Docker into GHCR using a token with `read:packages` and `write:packages`.
-Use that same token in `.env` for `VAST_IMAGE_LOGIN`: `-u USER -p TOKEN ghcr.io`, so Vast
-can pull the private image at `ghcr.io/thomasssb1/qwen-commit-cuda`.
-Run from the repository root:
+Keep the run directory until cleanup succeeds. Retry teardown with:
 
 ```console
-uv run python experiments/cuda/run.py
+uv run python experiments/cuda/run.py --cleanup experiments/cuda/artifacts/vast/RUN_ID
 ```
 
-Builds and pushes the image, creates a temporary private S3 bucket, and launches
-the image directly on Vast. The container tests one training row using expiring
-transfer URLs. The runner saves `cuda-smoke.json` and `smoke.log`, then destroys
-the rental and bucket, including its objects. The registry image is retained.
-The bucket is unversioned; leftover objects expire after seven days.
-Artifacts and recovery state stay under `experiments/cuda/artifacts/vast/`.
+Check `run.json` for cleanup status. If provisioning was interrupted, also check Vast and S3 for resources named `qwen-cuda-...` from that run. The runner retries transient polling failures automatically.
 
-Defaults to the cheapest matching RTX 3090 or RTX PRO 4000, up to $0.50/hour
-including storage, with a 60-minute execution timeout.
+<details>
+<summary>Run the CUDA smoke test directly on an NVIDIA machine</summary>
 
-- `--gpu NAME`: replace the default GPU allowlist; repeat for multiple models.
-- `--max-hourly-price USD`: set the maximum hourly price, including storage.
-- `--timeout-minutes N`: set the rental execution timeout.
-- `--dataset PATH`: use a different prepared training or validation Parquet file for the selected check.
-- `--reviewed-validation PATH`: mark an approved reference subset for a validation run.
-- `--image-repository REPO`: change the registry repository; also accepts `VAST_IMAGE_REPOSITORY`.
-- `--aws-region REGION`: choose the bucket region; defaults to the AWS configuration or `eu-west-2`.
-
-Keep the run directory until cleanup succeeds. Retry failed teardown with:
-
-```console
-uv run python experiments/cuda/run.py --cleanup PATH_TO_RUN_DIRECTORY
-```
-
-If provisioning was interrupted, check Vast and S3 for leftovers named
-`qwen-cuda-...` from the run. Keep the runner open until teardown finishes.
-
-Transient Vast status-request timeouts, disconnected reads, rate limits, and
-selected server errors get up to three recovery attempts, with 10/20/30-second
-delays within the existing execution or cleanup deadline. After a readiness
-poll fails, Terraform's `apply -refresh-only` reads the existing rental and
-recovers its outputs. The runner then checks its price and waits for the validated
-container report. It never repeats the rental-creation apply. Teardown retries
-refresh/destroy and still requires empty Terraform state before confirming cleanup.
-Authentication, configuration, host startup, and ambiguous creation failures
-remain failures; the private per-operation JSON logs retain every attempt.
-
-The polling regression can also exercise the pinned provider against a local
-HTTP server. Set `VASTAI_TEST_PLUGIN_DIR` to an existing Terraform
-`.terraform/providers` directory, then run `uv run pytest tests/test_vast_polling.py`.
-This test uses no cloud resources or credentials. Without the provider directory,
-only this integration test is skipped; the other polling tests still run.
-
-## Rental-GPU smoke test
-
-Run this only on a machine with a compatible NVIDIA driver, Docker Engine, and NVIDIA Container Toolkit. The smoke test does not download Qwen or perform model inference. It reads one batch from `train.parquet`, verifies the requested GPU is usable with a CUDA tensor operation, prints diagnostics, and writes `cuda-smoke.json` to the artifact directory.
-
-In PowerShell, from the repository root:
+Requires Docker, a compatible NVIDIA driver, NVIDIA Container Toolkit, and `notebooks/prepared/train.parquet`. In PowerShell:
 
 ```powershell
 $env:QWEN_COMMIT_DATASET_DIR = (Resolve-Path notebooks/prepared).Path
@@ -201,4 +84,6 @@ docker compose --file experiments/cuda/compose.yaml build
 docker compose --file experiments/cuda/compose.yaml run --rm cuda-experiment
 ```
 
-`QWEN_COMMIT_ARTIFACT_DIR` must be a private, writable directory. Do not commit it or the generated smoke report. A CUDA-unavailable result is a failure, rather than a CPU fallback: the point of this check is to validate the rental GPU before later work consumes it.
+This checks CUDA and writes `cuda-smoke.json`; it does not load Qwen.
+
+</details>
