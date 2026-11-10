@@ -58,7 +58,7 @@ The pinned Qwen3-4B judge assesses every approved validation example. Oversized 
 - **Correctness:** accurate subjects divided by all approved validation examples.
 - **Usable output:** subjects that are both accurate and format-valid, using the same denominator.
 
-Rates remain unavailable while that grader has pending or uncertain examples. Human review is required to establish the correctness baseline.
+Human review is required to establish the correctness baseline.
 
 ## Recover interrupted runs
 
