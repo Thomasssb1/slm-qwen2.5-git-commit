@@ -221,15 +221,16 @@ def test_local_inference_keeps_full_diff_and_defers_context_overflow(judge, monk
         assert judge.verdict(result)["rating"] == "uncertain"
 
 
-def test_human_review_requires_diff_inspection_and_saves_separate_evidence_on_quit(
+def test_human_review_saves_decisions_without_a_name_and_resumes(
     judge, run_directory, monkeypatch, capsys
 ):
     run_judging(judge, run_directory, FakeJudge(), limit=1)
-    answers = iter(["Human reviewer", "a", "d", "i", "", "i", "Evidence contradicts subject.", "q"])
+    answers = iter(["a", "d", "i", "", "i", "Evidence contradicts subject.", "q"])
     monkeypatch.setattr("builtins.input", lambda _: next(answers))
     summary = review_interactively(judge, run_directory)
     review = json.loads((run_directory / judge.REVIEW_FILENAME).read_text())
-    assert review["reviewer"] == "Human reviewer"
+    assert "reviewer" not in review
+    assert "human_reviewer" not in summary
     assert review["results"] == [
         {"id": "a", "rating": "incorrect", "rationale": "Evidence contradicts subject."}
     ]
@@ -246,19 +247,16 @@ def test_human_review_requires_diff_inspection_and_saves_separate_evidence_on_qu
     assert summary["human_reviewed"]["usable_rate"] == 0.5
 
 
-@pytest.mark.parametrize("failure", ["duplicate", "unknown", "rating", "rationale", "reviewer"])
+@pytest.mark.parametrize("failure", ["duplicate", "unknown", "rating", "rationale"])
 def test_malformed_human_reviews_cannot_replace_summary(judge, run_directory, failure):
     run_judging(judge, run_directory, FakeJudge())
     rows, digest = judge.approved_predictions(run_directory)
     reviews = judge.read_reviews(run_directory, rows, digest)
-    reviews["reviewer"] = "Reviewer"
     reviews["results"] = [{"id": "a", "rating": "accurate", "rationale": "Evidence"}]
     if failure == "duplicate":
         reviews["results"] *= 2
     elif failure == "unknown":
         reviews["results"][0]["id"] = "unknown"
-    elif failure == "reviewer":
-        reviews["reviewer"] = ""
     else:
         reviews["results"][0][failure] = ""
     (run_directory / judge.REVIEW_FILENAME).write_text(json.dumps(reviews))
@@ -303,7 +301,7 @@ def test_uncertain_human_decisions_are_revisited_without_changing_the_denominato
     judge, run_directory, monkeypatch
 ):
     run_judging(judge, run_directory, FakeJudge())
-    answers = iter(["Reviewer", "d", "u", "Need more inspection.", "q"])
+    answers = iter(["d", "u", "Need more inspection.", "q"])
     monkeypatch.setattr("builtins.input", lambda _: next(answers))
     first = review_interactively(judge, run_directory)
     assert first["human_reviewed"]["ratings"]["uncertain"] == 1
@@ -314,14 +312,6 @@ def test_uncertain_human_decisions_are_revisited_without_changing_the_denominato
     assert second["human_reviewed"]["assessed"] == 1
     assert second["human_reviewed"]["ratings"]["uncertain"] == 0
     assert second["human_reviewed"]["correct"] == 1
-
-
-def test_empty_reviewer_name_cannot_create_a_human_review(judge, run_directory, monkeypatch):
-    run_judging(judge, run_directory, FakeJudge())
-    monkeypatch.setattr("builtins.input", lambda _: " ")
-    with pytest.raises(ValueError, match="reviewer name is required"):
-        review_interactively(judge, run_directory)
-    assert not (run_directory / judge.REVIEW_FILENAME).exists()
 
 
 @pytest.mark.parametrize("hip,available", [(None, True), ("7.2", False)])

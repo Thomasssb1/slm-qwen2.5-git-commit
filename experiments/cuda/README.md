@@ -47,8 +47,6 @@ uv run python experiments/cuda/evaluate.py experiments/cuda/artifacts/vast/RUN_I
 
 Writes `evaluation.json` with formatting results and generation-only latency. Timing excludes tokenization, model loading, provisioning, and transfer. Formatting does not measure correctness.
 
-For the optional 12-example audit, copy `semantic-review-template.json` to `semantic-review.json`, fill in the reviewer, ratings, and rationales, then rerun the evaluator with `--review PATH_TO_REVIEW`. This sample is not an overall accuracy estimate.
-
 ## Judge correctness locally
 
 Open [judge_predictions.ipynb](../../notebooks/judge_predictions.ipynb) in the **Qwen Commit Review (ROCm)** kernel.
