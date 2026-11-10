@@ -48,7 +48,7 @@ def completed_review(directory):
     return path, review
 
 
-def test_cli_reports_all_rows_including_invalid_outputs_and_approved_subset(run_directory):
+def test_cli_writes_json_only_with_all_rows_and_approved_subset(run_directory, capsys):
     # A reserved file that would fail if evaluation tried to read it as Parquet.
     (run_directory / "test.parquet").write_bytes(b"Do not open")
     original = (run_directory / data.PREDICTIONS_FILENAME).read_bytes()
@@ -70,9 +70,8 @@ def test_cli_reports_all_rows_including_invalid_outputs_and_approved_subset(run_
     assert result["predictions_sha256"] == data.file_sha256(
         run_directory / data.PREDICTIONS_FILENAME
     )
-    text = (run_directory / "evaluation.md").read_text()
-    assert "| all_validation | 3 | 2 | 66.7% | 1 | 2.0000 | 8.3000 |" in text
-    assert "Excludes tokenization" in text and "not a full-split accuracy estimate" in text
+    assert not (run_directory / "evaluation.md").exists()
+    assert capsys.readouterr().out == f"Evaluation saved to {run_directory / 'evaluation.json'}\n"
     assert (run_directory / data.PREDICTIONS_FILENAME).read_bytes() == original
 
 
@@ -92,7 +91,7 @@ def test_sample_is_capped_sorted_and_includes_format_failures_without_using_thei
     assert sum(row["valid"] for row in selected) == 6
 
 
-def test_completed_review_aggregates_ratings_but_displays_original_evidence(run_directory):
+def test_completed_review_aggregates_ratings_but_preserves_original_evidence(run_directory):
     evaluation.evaluate(run_directory)
     path, review = completed_review(run_directory)
     review["examples"][0]["raw_output"] = "Forged copied evidence"
@@ -106,9 +105,7 @@ def test_completed_review_aggregates_ratings_but_displays_original_evidence(run_
     assert [row["id"] for row in semantic["examples"]] == ["a", "z"]
     assert semantic["examples"][0]["raw_output"] == "`" + "x" * 73 + "`"
     assert semantic["examples"][0]["format_errors"] == ["too_long", "markdown"]
-    text = (run_directory / "evaluation.md").read_text()
-    assert "### a: partial" in text and "Evidence for a." in text
-    assert "Forged copied evidence" not in text
+    assert semantic["examples"][0]["rationale"] == "Evidence for a."
     assert (run_directory / "semantic-review-template.json").read_bytes() == template_before
 
 
@@ -154,10 +151,6 @@ def test_unknown_reference_approval_is_unavailable_and_single_row_latency_is_def
     assert result["semantic_review"]["status"] == "unavailable"
     timing = result["cohorts"]["all_validation"]["generation_seconds"]
     assert timing["min"] == timing["median"] == timing["p95"] == timing["max"]
-    assert (
-        "| approved_references | 0 | 0 | n/a | 0 | n/a | n/a |"
-        in (run_directory / "evaluation.md").read_text()
-    )
 
 
 def test_changed_prediction_artifact_cannot_be_evaluated(run_directory):

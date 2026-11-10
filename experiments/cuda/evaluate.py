@@ -129,76 +129,6 @@ def semantic_review(template: dict, path: Path | None) -> dict:
     return result
 
 
-def render_markdown(result: dict) -> str:
-    lines = [
-        "# Validation baseline evaluation",
-        "",
-        f"Run: `{result['run_id']}`. Predictions SHA-256: `{result['predictions_sha256']}`.",
-        "",
-        f"Model: `{result['model_id']}` at `{result['model_revision']}`.",
-        f"GPU: {result['gpu']}. Model download/load: {result['load_seconds']:.3f} seconds.",
-        "",
-        "## Formatting and latency",
-        "",
-        "| Cohort | Rows | Format passes | Pass rate | Truncated | Median (s) | p95 (s) |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
-    ]
-    for name, group in result["cohorts"].items():
-        rate = f"{group['format_pass_rate']:.1%}" if group["rows"] else "n/a"
-        timing = group["generation_seconds"]
-        median = f"{timing['median']:.4f}" if timing else "n/a"
-        p95 = f"{timing['p95']:.4f}" if timing else "n/a"
-        lines.append(
-            f"| {name} | {group['rows']} | {group['format_passes']} | {rate} | "
-            f"{group['truncated_inputs']} | {median} | {p95} |"
-        )
-    lines.extend(["", LATENCY_SCOPE, "", "Error counts can overlap within a row.", ""])
-    for name, group in result["cohorts"].items():
-        lines.append(f"- {name}: `{json.dumps(group['error_counts'], sort_keys=True)}`")
-    lines.extend(
-        [
-            "",
-            "Formatting uses the existing mechanical checker; it does not prove semantic correctness "
-            "or detect every possible explanation. No outputs were repaired or regenerated.",
-            "",
-            "## Correctness sample",
-            "",
-            REVIEW_SELECTION,
-            REVIEW_SCOPE,
-        ]
-    )
-    review = result["semantic_review"]
-    lines.extend(["", f"Review status: {review['status']}; sample size: {review['sample_size']}."])
-    if review["status"] == "complete":
-        lines.extend([f"Reviewer: {review['reviewer']}.", "", json.dumps(review["ratings"]), ""])
-        for example in review["examples"]:
-            lines.extend(
-                [
-                    f"### {example['id']}: {example['rating']}",
-                    "",
-                    "```json",
-                    json.dumps(
-                        {
-                            key: example[key]
-                            for key in (
-                                "raw_output",
-                                "reference_subject",
-                                "diff_truncated",
-                                "format_errors",
-                            )
-                        },
-                        indent=2,
-                        ensure_ascii=False,
-                    ),
-                    "```",
-                    "",
-                    example["rationale"],
-                    "",
-                ]
-            )
-    return "\n".join(lines).rstrip() + "\n"
-
-
 def load_predictions(directory: Path) -> tuple[dict, list[dict], dict]:
     """Read predictions only after verifying the saved generation report and local join."""
     report = validate_report(directory / "validation.json", check="validation")
@@ -235,7 +165,6 @@ def evaluate(directory: Path, review_path: Path | None = None) -> dict:
     if not template_path.exists():
         write_json(template_path, template)
     write_json(directory / "evaluation.json", result)
-    (directory / "evaluation.md").write_text(render_markdown(result), encoding="utf-8")
     return result
 
 
@@ -245,7 +174,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--review", type=Path, help="Completed semantic review JSON for this run.")
     args = parser.parse_args(argv)
     evaluate(args.run_directory, args.review)
-    print(f"Evaluation saved to {args.run_directory / 'evaluation.md'}")
+    print(f"Evaluation saved to {args.run_directory / 'evaluation.json'}")
 
 
 if __name__ == "__main__":

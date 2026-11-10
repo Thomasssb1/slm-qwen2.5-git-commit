@@ -45,7 +45,7 @@ Results include `validation-predictions.parquet` with joined predictions, diffs,
 uv run python experiments/cuda/evaluate.py experiments/cuda/artifacts/vast/RUN_ID
 ```
 
-Writes `evaluation.json` and `evaluation.md` with formatting results and generation-only latency. Timing excludes tokenization, model loading, provisioning, and transfer. Formatting does not measure correctness.
+Writes `evaluation.json` with formatting results and generation-only latency. Timing excludes tokenization, model loading, provisioning, and transfer. Formatting does not measure correctness.
 
 For the optional 12-example audit, copy `semantic-review-template.json` to `semantic-review.json`, fill in the reviewer, ratings, and rationales, then rerun the evaluator with `--review PATH_TO_REVIEW`. This sample is not an overall accuracy estimate.
 
