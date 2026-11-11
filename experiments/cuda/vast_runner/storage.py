@@ -36,7 +36,7 @@ class Transfer:
         )
 
     def prepare(self, bucket: str, sample: Path | None, run_id: str, seconds: int) -> dict:
-        job = {
+        run_config = {
             "run_id": run_id,
             "result_url": self.client.generate_presigned_url(
                 "put_object",
@@ -48,11 +48,11 @@ class Transfer:
         if sample is not None:
             data = sample.read_bytes()
             self.client.put_object(Bucket=bucket, Key=sample.name, Body=data)
-            job["sample_sha256"] = hashlib.sha256(data).hexdigest()
-            job["sample_url"] = self.client.generate_presigned_url(
+            run_config["sample_sha256"] = hashlib.sha256(data).hexdigest()
+            run_config["sample_url"] = self.client.generate_presigned_url(
                 "get_object", Params={"Bucket": bucket, "Key": sample.name}, ExpiresIn=seconds
             )
-        return job
+        return run_config
 
     def collect(
         self, bucket: str, directory: Path, run_id: str, deadline: float, *, check: str = "cuda"

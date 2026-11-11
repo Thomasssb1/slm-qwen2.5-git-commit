@@ -23,7 +23,7 @@ GENERATION_SETTINGS = {
     "use_cache": True,
 }
 SYSTEM_PROMPT = (
-    Path(__file__).with_name("commit_subject_prompt.txt").read_text(encoding="utf-8").rstrip("\n")
+    Path(__file__).with_name("commit_subject_prompt.md").read_text(encoding="utf-8").rstrip("\n")
 )
 
 

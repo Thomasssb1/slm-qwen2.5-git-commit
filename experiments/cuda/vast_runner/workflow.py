@@ -102,10 +102,10 @@ def run_smoke(
         ).stdout.strip()
         state["bucket"] = bucket
         write_json(directory / "run.json", state)
-        variables["job"] = transfer.prepare(
+        variables["run_config"] = transfer.prepare(
             bucket, sample, run_id, math.ceil(timeout_minutes * 60) + 300
         )
-        variables["job"]["check"] = check
+        variables["run_config"]["check"] = check
         variables["launch"] = True
         write_json(infrastructure / "run.auto.tfvars.json", variables)
         print(

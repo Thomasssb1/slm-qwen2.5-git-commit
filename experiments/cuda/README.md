@@ -35,7 +35,7 @@ uv run python experiments/cuda/run.py --check validation --reviewed-validation n
 
 Reads `notebooks/prepared/validation.parquet`; use `--dataset PATH` to override it. The optional reviewed file marks approved references without filtering the full split. Only IDs and diffs are uploaded; reference subjects stay local. The test split is not read.
 
-Generation uses the [commit-subject prompt](commit_subject_prompt.txt), greedy decoding, the first 4,096 diff tokens, and up to 64 output tokens. Subjects must pass the one-line, 72-character format check; invalid outputs are retained without repair.
+Generation uses the [commit-subject prompt](commit_subject_prompt.md), greedy decoding, the first 4,096 diff tokens, and up to 64 output tokens. Subjects must pass the one-line, 72-character format check; invalid outputs are retained without repair.
 
 Results include `validation-predictions.parquet` with joined predictions, diffs, and references, plus `validation.json` with raw results and generation settings. Keep the run directory intact for evaluation.
 

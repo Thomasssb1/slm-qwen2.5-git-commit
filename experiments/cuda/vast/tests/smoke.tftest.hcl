@@ -14,7 +14,7 @@ provider "vastai" {
 variables {
   image  = "ghcr.io/example/cuda@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   launch = true
-  job = {
+  run_config = {
     run_id        = "test"
     sample_sha256 = "sample-checksum"
     sample_url    = "https://example.invalid/sample"
@@ -156,24 +156,24 @@ run "storage_before_launch" {
   }
 }
 
-run "launch_uses_published_image_and_transfer_job" {
+run "launch_uses_published_image_and_run_config" {
   command = plan
   assert {
-    condition     = vastai_instance.smoke[0].image == var.image && vastai_instance.smoke[0].args[0] == "/opt/qwen-commit/startup.py" && jsondecode(vastai_instance.smoke[0].args[1]) == var.job
-    error_message = "Run the image wrapper with the scoped transfer job."
+    condition     = vastai_instance.smoke[0].image == var.image && vastai_instance.smoke[0].args[0] == "/opt/qwen-commit/startup.py" && jsondecode(vastai_instance.smoke[0].args[1]) == var.run_config
+    error_message = "Run the image wrapper with the scoped container run configuration."
   }
 }
 
-run "reject_launch_without_transfer_job" {
+run "reject_launch_without_run_config" {
   command = plan
-  variables { job = null }
+  variables { run_config = null }
   expect_failures = [vastai_instance.smoke[0]]
 }
 
 run "model_load_without_dataset" {
   command = plan
   variables {
-    job = {
+    run_config = {
       run_id       = "model-test"
       check        = "model"
       result_url   = "https://example.invalid/result"
@@ -189,20 +189,20 @@ run "model_load_without_dataset" {
 run "reject_unknown_check" {
   command = plan
   variables {
-    job = {
+    run_config = {
       run_id       = "bad-test"
       check        = "unknown"
       result_url   = "https://example.invalid/result"
       hold_seconds = 3000
     }
   }
-  expect_failures = [var.job]
+  expect_failures = [var.run_config]
 }
 
 run "inference_without_dataset" {
   command = plan
   variables {
-    job = {
+    run_config = {
       run_id       = "inference-test"
       check        = "inference"
       result_url   = "https://example.invalid/result"
@@ -218,19 +218,19 @@ run "inference_without_dataset" {
 run "reject_cuda_without_sample" {
   command = plan
   variables {
-    job = {
+    run_config = {
       run_id       = "bad-test"
       result_url   = "https://example.invalid/result"
       hold_seconds = 3000
     }
   }
-  expect_failures = [var.job]
+  expect_failures = [var.run_config]
 }
 
 run "validation_with_input" {
   command = plan
   variables {
-    job = {
+    run_config = {
       run_id        = "validation-test"
       check         = "validation"
       sample_sha256 = "input-checksum"
@@ -240,7 +240,7 @@ run "validation_with_input" {
     }
   }
   assert {
-    condition     = jsondecode(vastai_instance.smoke[0].args[1]).check == "validation" && jsondecode(vastai_instance.smoke[0].args[1]).sample_url == var.job.sample_url
+    condition     = jsondecode(vastai_instance.smoke[0].args[1]).check == "validation" && jsondecode(vastai_instance.smoke[0].args[1]).sample_url == var.run_config.sample_url
     error_message = "Pass validation mode and its scoped input transfer through to the container."
   }
 }
@@ -248,12 +248,12 @@ run "validation_with_input" {
 run "reject_validation_without_input" {
   command = plan
   variables {
-    job = {
+    run_config = {
       run_id       = "bad-validation-test"
       check        = "validation"
       result_url   = "https://example.invalid/result"
       hold_seconds = 3000
     }
   }
-  expect_failures = [var.job]
+  expect_failures = [var.run_config]
 }

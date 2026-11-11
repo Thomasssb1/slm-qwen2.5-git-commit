@@ -61,11 +61,11 @@ def test_prepare_uploads_sample_and_signs_only_its_get_and_result_put(tmp_path, 
                 "Body": sample.read_bytes(),
             },
         )
-        job = transfer.prepare("test-bucket", sample, "run-id", 3900)
+        run_config = transfer.prepare("test-bucket", sample, "run-id", 3900)
         stub.assert_no_pending_responses()
-    assert job["sample_sha256"] == hashlib.sha256(sample.read_bytes()).hexdigest()
+    assert run_config["sample_sha256"] == hashlib.sha256(sample.read_bytes()).hexdigest()
     for key, path in (("sample_url", "/" + filename), ("result_url", "/result.json")):
-        url = urlparse(job[key])
+        url = urlparse(run_config[key])
         query = parse_qs(url.query)
         assert url.scheme == "https"
         assert url.hostname == "test-bucket.s3.eu-west-2.amazonaws.com"
@@ -73,10 +73,10 @@ def test_prepare_uploads_sample_and_signs_only_its_get_and_result_put(tmp_path, 
         assert query["X-Amz-Expires"] == ["3900"]
         assert query["X-Amz-Algorithm"] == ["AWS4-HMAC-SHA256"]
         assert len(query["X-Amz-Signature"][0]) == 64
-    assert parse_qs(urlparse(job["result_url"]).query)["X-Amz-SignedHeaders"] == [
+    assert parse_qs(urlparse(run_config["result_url"]).query)["X-Amz-SignedHeaders"] == [
         "content-type;host"
     ]
-    assert "local-fixture-secret" not in json.dumps(job)
+    assert "local-fixture-secret" not in json.dumps(run_config)
 
 
 def test_missing_aws_credentials_fail_before_provisioning(monkeypatch):
@@ -92,11 +92,11 @@ def test_missing_aws_credentials_fail_before_provisioning(monkeypatch):
 def test_model_transfer_only_signs_result_upload_without_sending_a_sample(transfer):
     # No S3 requests are expected: a model load uses only the public checkpoint.
     with Stubber(transfer.client):
-        job = transfer.prepare("test-bucket", None, "model-run", 3900)
-    assert "sample_url" not in job
-    assert "sample_sha256" not in job
-    assert urlparse(job["result_url"]).path == "/result.json"
-    assert job["run_id"] == "model-run"
+        run_config = transfer.prepare("test-bucket", None, "model-run", 3900)
+    assert "sample_url" not in run_config
+    assert "sample_sha256" not in run_config
+    assert urlparse(run_config["result_url"]).path == "/result.json"
+    assert run_config["run_id"] == "model-run"
 
 
 def test_missing_result_polls_until_deadline(tmp_path, transfer, monkeypatch):
@@ -212,7 +212,7 @@ def test_container_downloads_runs_and_uploads_outcome_then_exits_after_hold(
     if failure == "download":
         http_transfer["get_status"] = 403
     http_transfer["put_failures"] = 3 if failure == "upload" else 1
-    job = {
+    run_config = {
         "run_id": "fixture-run",
         "check": check,
         "sample_url": http_transfer["url"] + "/sample?secret=do-not-log",
@@ -231,7 +231,7 @@ def test_container_downloads_runs_and_uploads_outcome_then_exits_after_hold(
             remote.execute, sample=sample, report=report, command=[sys.executable, str(script)]
         ),
     )
-    assert remote.main(job) == (1 if failure else 0)
+    assert remote.main(run_config) == (1 if failure else 0)
     assert clock.now == 65
     assert marker.exists() == (failure not in {"checksum", "download"})
     result = http_transfer["result"]
