@@ -47,8 +47,9 @@ def transfer(monkeypatch):
     return storage.Transfer("eu-west-2")
 
 
-def test_prepare_uploads_sample_and_signs_only_its_get_and_result_put(tmp_path, transfer):
-    sample = tmp_path / "train.parquet"
+@pytest.mark.parametrize("filename", ["train.parquet", "validation-input.parquet"])
+def test_prepare_uploads_sample_and_signs_only_its_get_and_result_put(tmp_path, transfer, filename):
+    sample = tmp_path / filename
     sample.write_bytes(b"one private row")
     with Stubber(transfer.client) as stub:
         stub.add_response(
@@ -56,15 +57,15 @@ def test_prepare_uploads_sample_and_signs_only_its_get_and_result_put(tmp_path, 
             {},
             {
                 "Bucket": "test-bucket",
-                "Key": "train.parquet",
+                "Key": filename,
                 "Body": sample.read_bytes(),
             },
         )
-        job = transfer.prepare("test-bucket", sample, "run-id", 3900)
+        run_config = transfer.prepare("test-bucket", sample, "run-id", 3900)
         stub.assert_no_pending_responses()
-    assert job["sample_sha256"] == hashlib.sha256(sample.read_bytes()).hexdigest()
-    for key, path in (("sample_url", "/train.parquet"), ("result_url", "/result.json")):
-        url = urlparse(job[key])
+    assert run_config["sample_sha256"] == hashlib.sha256(sample.read_bytes()).hexdigest()
+    for key, path in (("sample_url", "/" + filename), ("result_url", "/result.json")):
+        url = urlparse(run_config[key])
         query = parse_qs(url.query)
         assert url.scheme == "https"
         assert url.hostname == "test-bucket.s3.eu-west-2.amazonaws.com"
@@ -72,10 +73,10 @@ def test_prepare_uploads_sample_and_signs_only_its_get_and_result_put(tmp_path, 
         assert query["X-Amz-Expires"] == ["3900"]
         assert query["X-Amz-Algorithm"] == ["AWS4-HMAC-SHA256"]
         assert len(query["X-Amz-Signature"][0]) == 64
-    assert parse_qs(urlparse(job["result_url"]).query)["X-Amz-SignedHeaders"] == [
+    assert parse_qs(urlparse(run_config["result_url"]).query)["X-Amz-SignedHeaders"] == [
         "content-type;host"
     ]
-    assert "local-fixture-secret" not in json.dumps(job)
+    assert "local-fixture-secret" not in json.dumps(run_config)
 
 
 def test_missing_aws_credentials_fail_before_provisioning(monkeypatch):
@@ -86,6 +87,16 @@ def test_missing_aws_credentials_fail_before_provisioning(monkeypatch):
     monkeypatch.setattr(storage.boto3, "Session", lambda **kwargs: Session())
     with pytest.raises(RunError, match="Configure AWS credentials"):
         storage.Transfer(None)
+
+
+def test_model_transfer_only_signs_result_upload_without_sending_a_sample(transfer):
+    # No S3 requests are expected: a model load uses only the public checkpoint.
+    with Stubber(transfer.client):
+        run_config = transfer.prepare("test-bucket", None, "model-run", 3900)
+    assert "sample_url" not in run_config
+    assert "sample_sha256" not in run_config
+    assert urlparse(run_config["result_url"]).path == "/result.json"
+    assert run_config["run_id"] == "model-run"
 
 
 def test_missing_result_polls_until_deadline(tmp_path, transfer, monkeypatch):
@@ -110,20 +121,31 @@ def test_access_denied_does_not_wait_until_timeout(tmp_path, transfer):
 
 
 @pytest.mark.parametrize(
-    "payload, message",
+    "payload, message, check",
     [
-        (b"x" * (2 * 1024 * 1024 + 1), "oversized"),
-        (b"[]", "does not belong"),
-        (b'{"run_id":"different"}', "does not belong"),
-        (b'{"run_id":"run-id","outcome":"passed"}', "does not prove"),
+        (b"x" * (2 * 1024 * 1024 + 1), "oversized", "cuda"),
+        (b"[]", "does not belong", "cuda"),
+        (b'{"run_id":"different"}', "does not belong", "cuda"),
+        (b'{"run_id":"run-id","outcome":"passed"}', "does not prove", "cuda"),
+        (b"[]", "does not belong", "validation"),
+        (b'{"run_id":"different"}', "does not belong", "validation"),
+        (b'{"run_id":"run-id","outcome":"passed"}', "does not prove", "validation"),
     ],
-    ids=["oversized", "wrong-shape", "wrong-run", "missing-report"],
+    ids=[
+        "oversized",
+        "wrong-shape",
+        "wrong-run",
+        "missing-report",
+        "validation-wrong-shape",
+        "validation-wrong-run",
+        "validation-missing-report",
+    ],
 )
-def test_invalid_remote_results_cannot_pass(tmp_path, transfer, payload, message):
+def test_invalid_remote_results_cannot_pass(tmp_path, transfer, payload, message, check):
     with Stubber(transfer.client) as stub:
         stub.add_response("get_object", {"Body": io.BytesIO(payload)})
         with pytest.raises(RunError, match=message):
-            transfer.collect("test-bucket", tmp_path, "run-id", float("inf"))
+            transfer.collect("test-bucket", tmp_path, "run-id", float("inf"), check=check)
 
 
 @pytest.fixture
@@ -165,8 +187,9 @@ def http_transfer():
 @pytest.mark.parametrize(
     "failure", [None, "cuda", "checksum", "download", "missing-report", "upload"]
 )
+@pytest.mark.parametrize("check", ["cuda", "validation"])
 def test_container_downloads_runs_and_uploads_outcome_then_exits_after_hold(
-    tmp_path, http_transfer, monkeypatch, failure
+    tmp_path, http_transfer, monkeypatch, failure, check
 ):
     sample = tmp_path / "train.parquet"
     report = tmp_path / "report.json"
@@ -189,8 +212,9 @@ def test_container_downloads_runs_and_uploads_outcome_then_exits_after_hold(
     if failure == "download":
         http_transfer["get_status"] = 403
     http_transfer["put_failures"] = 3 if failure == "upload" else 1
-    job = {
+    run_config = {
         "run_id": "fixture-run",
+        "check": check,
         "sample_url": http_transfer["url"] + "/sample?secret=do-not-log",
         "sample_sha256": "wrong"
         if failure == "checksum"
@@ -207,7 +231,7 @@ def test_container_downloads_runs_and_uploads_outcome_then_exits_after_hold(
             remote.execute, sample=sample, report=report, command=[sys.executable, str(script)]
         ),
     )
-    assert remote.main(job) == (1 if failure else 0)
+    assert remote.main(run_config) == (1 if failure else 0)
     assert clock.now == 65
     assert marker.exists() == (failure not in {"checksum", "download"})
     result = http_transfer["result"]
@@ -224,14 +248,22 @@ def test_container_downloads_runs_and_uploads_outcome_then_exits_after_hold(
         assert "smoke diagnostics" in result["log"]
 
 
-def test_container_reports_subprocess_timeout(http_transfer, tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "check, expected_timeout",
+    [("cuda", 300), ("model", 1800), ("inference", 1800), ("validation", 1800)],
+)
+def test_container_reports_subprocess_timeout(
+    http_transfer, tmp_path, monkeypatch, check, expected_timeout
+):
     def timeout(*args, **kwargs):
-        raise subprocess.TimeoutExpired("smoke", 300)
+        assert kwargs["timeout"] == expected_timeout
+        raise subprocess.TimeoutExpired("smoke", expected_timeout)
 
     monkeypatch.setattr(remote.subprocess, "run", timeout)
     result = remote.execute(
         {
             "run_id": "fixture-run",
+            "check": check,
             "sample_url": http_transfer["url"],
             "sample_sha256": hashlib.sha256(http_transfer["sample"]).hexdigest(),
         },
@@ -240,3 +272,44 @@ def test_container_reports_subprocess_timeout(http_transfer, tmp_path, monkeypat
     )
     assert result["outcome"] == "failed"
     assert "TimeoutExpired" in result["log"]
+
+
+@pytest.mark.parametrize("failure", [None, "process", "missing-report"])
+@pytest.mark.parametrize("check", ["model", "inference"])
+def test_model_container_runs_without_sample_urls_and_requires_a_fresh_report(
+    tmp_path, failure, check
+):
+    report = tmp_path / "model-load.json"
+    report.write_text('{"stale": true}')
+    script = tmp_path / "model.py"
+    script.write_text(
+        "from pathlib import Path\nprint('model diagnostics')\n"
+        + (
+            f"Path({str(report)!r}).write_text('{{\"loaded\": true}}')\n"
+            if failure != "missing-report"
+            else ""
+        )
+        + ("raise SystemExit(1)\n" if failure == "process" else "")
+    )
+    result = remote.execute(
+        {"run_id": "model-run", "check": check},
+        sample=tmp_path / "sample",
+        report=report,
+        command=[sys.executable, str(script)],
+    )
+    assert result["outcome"] == ("failed" if failure else "passed")
+    assert "model diagnostics" in result["log"]
+    assert not (tmp_path / "sample").exists()
+    if not failure:
+        assert result["report"] == {"loaded": True}
+
+
+def test_container_rejects_unknown_check_without_starting_a_command(tmp_path):
+    marker = tmp_path / "ran"
+    result = remote.execute(
+        {"run_id": "model-run", "check": "unknown"},
+        command=[sys.executable, "-c", f"from pathlib import Path; Path({str(marker)!r}).touch()"],
+    )
+    assert result["outcome"] == "failed"
+    assert "ValueError" in result["log"]
+    assert not marker.exists()

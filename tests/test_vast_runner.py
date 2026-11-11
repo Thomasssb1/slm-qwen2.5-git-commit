@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import io
 import json
@@ -24,6 +25,7 @@ runner = importlib.util.module_from_spec(SPEC)
 with pytest.MonkeyPatch.context() as imports:
     imports.syspath_prepend(str(RUNNER_PATH.parent))
     SPEC.loader.exec_module(runner)
+    from generation import SYSTEM_PROMPT
     from vast_runner import RunError, artifacts
     from vast_runner import commands as command_tools
     from vast_runner import terraform as terraform_tools
@@ -47,6 +49,67 @@ def valid_report() -> dict:
         "cuda_runtime_version": "13.2",
         "torch_version": "2.12.1+cu132",
         "cuda_tensor_checksum": 357389824.0,
+    }
+
+
+def valid_model_report() -> dict:
+    report = valid_report()
+    del report["one_batch_rows"]
+    return report | {
+        "model_id": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+        "model_revision": "2e1fd397ee46e1388853d2af2c993145b0f1098a",
+        "model_class": "Qwen2ForCausalLM",
+        "parameter_count": 1543714304,
+        "cuda_parameter_count": 1543714304,
+        "parameter_dtype": "bfloat16",
+        "tokenizer_vocab_size": 151665,
+        "tokenizer_probe_tokens": 4,
+        "transformers_version": "5.22.2",
+        "load_seconds": 20.5,
+        "cuda_memory_allocated_bytes": 3100000000,
+        "cuda_peak_memory_allocated_bytes": 3200000000,
+    }
+
+
+def valid_inference_report() -> dict:
+    examples = {}
+    for name in ("single_file", "multiple_files", "truncated"):
+        original = 5000 if name == "truncated" else 100
+        examples[name] = {
+            "system_prompt": SYSTEM_PROMPT,
+            "system_prompt_sha256": hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest(),
+            "max_diff_tokens": 4096,
+            "max_subject_characters": 72,
+            "truncation_side": "right",
+            "generation_config": {
+                "do_sample": False,
+                "num_beams": 1,
+                "num_return_sequences": 1,
+                "max_new_tokens": 64,
+                "min_new_tokens": 0,
+                "temperature": 1.0,
+                "top_p": 1.0,
+                "top_k": 50,
+                "repetition_penalty": 1.0,
+                "use_cache": True,
+            },
+            "diff_tokens": original,
+            "diff_tokens_used": min(original, 4096),
+            "diff_truncated": original > 4096,
+            "prompt_tokens": min(original, 4096) + 60,
+            "generated_tokens": 3,
+            "generated_token_ids": [123, 456, 151645],
+            "raw_output": "Trim whitespace from names",
+            "subject": "Trim whitespace from names",
+            "valid": True,
+            "errors": [],
+            "finish_reason": "eos",
+            "generation_seconds": 0.5,
+        }
+    return valid_model_report() | {
+        "examples": examples,
+        "repeat_matches": True,
+        "repeat_token_ids": examples["single_file"]["generated_token_ids"],
     }
 
 
@@ -169,16 +232,35 @@ class FakeTools:
                         self.cloud["rentals"] += 1
                         if self.failure != "untracked-create":
                             self.cloud["tracked"].add("container")
-                    report = valid_report()
+                    check = variables["run_config"]["check"]
+                    report = valid_model_report() if check == "model" else valid_report()
+                    if check == "inference":
+                        report = valid_inference_report()
+                    if check == "validation":
+                        inputs = self.directory / "validation-input.parquet"
+                        rows = pq.read_table(inputs).to_pylist()
+                        report = valid_model_report() | {
+                            "input_sha256": hashlib.sha256(inputs.read_bytes()).hexdigest(),
+                            "row_count": len(rows),
+                            "predictions": [
+                                {
+                                    "id": row["id"],
+                                    **valid_inference_report()["examples"]["single_file"],
+                                }
+                                for row in rows
+                            ],
+                        }
                     if self.failure == "report":
                         report["cuda_tensor_checksum"] = 0
                     result = {
-                        "run_id": variables["job"]["run_id"],
+                        "run_id": variables["run_config"]["run_id"],
                         "outcome": "failed" if self.failure == "smoke" else "passed",
                         "report": report,
                         "log": "CUDA subprocess output",
                     }
-                    self.cloud["objects"]["result.json"] = json.dumps(result).encode()
+                    self.cloud.setdefault("objects", {})["result.json"] = json.dumps(
+                        result
+                    ).encode()
                 (infrastructure / "terraform.tfstate").write_text(
                     json.dumps({"resources": sorted(self.cloud["tracked"])})
                 )
@@ -216,7 +298,7 @@ class FakeTools:
         return subprocess.CompletedProcess(arguments, 0, output, "")
 
 
-def invoke_fake(tmp_path, training_file, failure=None):
+def invoke_fake(tmp_path, training_file, failure=None, *, check="cuda"):
     cloud = {"resources": set(), "tracked": set(), "rentals": 0, "uploaded": []}
 
     def invoke():
@@ -228,9 +310,118 @@ def invoke_fake(tmp_path, training_file, failure=None):
             runs_directory=tmp_path / "runs",
             commands_type=lambda directory: FakeTools(directory, cloud, failure),
             transfer_type=lambda region: fake_transfer(cloud, failure),
+            check=check,
         )
 
     return invoke, cloud
+
+
+@pytest.mark.parametrize("failure", [None, "smoke", "report", "timeout"])
+def test_model_check_needs_no_dataset_collects_model_evidence_and_cleans_up(tmp_path, failure):
+    invoke, cloud = invoke_fake(tmp_path, tmp_path / "nonexistent.parquet", failure, check="model")
+    if failure:
+        with pytest.raises(RunError):
+            invoke()
+    else:
+        report = invoke()
+        assert report.name == "model-load.json"
+        assert json.loads(report.read_text()) == valid_model_report()
+    assert cloud["uploaded"] == []
+    assert cloud["resources"] == set()
+    assert cloud["rentals"] == 1
+    state = saved_run(tmp_path)
+    assert state["check"] == "model"
+    assert state["outcome"] == ("failed" if failure else "passed")
+    assert state["cleanup"] == "complete"
+    directory = next((tmp_path / "runs").iterdir())
+    assert not (directory / "train.parquet").exists()
+    run_config = json.loads((directory / "terraform/run.auto.tfvars.json").read_text())[
+        "run_config"
+    ]
+    assert run_config["check"] == "model"
+    assert "sample_url" not in run_config
+    assert "sample_sha256" not in run_config
+
+
+def test_unknown_check_fails_before_creating_run_artifacts(tmp_path):
+    invoke, cloud = invoke_fake(tmp_path, tmp_path / "missing", check="unknown")
+    with pytest.raises(ValueError, match="cuda, model, inference, or validation"):
+        invoke()
+    assert not (tmp_path / "runs").exists()
+    assert cloud["rentals"] == 0
+
+
+@pytest.mark.parametrize(
+    "check, filename, expected",
+    [
+        ("model", "model-load.json", valid_model_report),
+        ("inference", "inference-smoke.json", valid_inference_report),
+    ],
+)
+def test_cli_check_saves_model_or_inference_report_without_a_dataset(
+    tmp_path, monkeypatch, capsys, check, filename, expected
+):
+    cloud = {"resources": set(), "tracked": set(), "rentals": 0, "uploaded": []}
+    monkeypatch.setenv("VAST_API_KEY", "test-only-placeholder")
+    monkeypatch.setattr(
+        runner,
+        "run_smoke",
+        partial(
+            runner.run_smoke,
+            runs_directory=tmp_path / "runs",
+            commands_type=lambda directory: FakeTools(directory, cloud),
+            transfer_type=lambda region: fake_transfer(cloud),
+        ),
+    )
+    assert runner.main(["--check", check]) == 0
+    report = next((tmp_path / "runs").glob("*/" + filename))
+    assert json.loads(report.read_text()) == expected()
+    assert f"{check.capitalize()} check passed" in capsys.readouterr().out
+    assert cloud["resources"] == set()
+    assert cloud["uploaded"] == []
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"system_prompt": "wrong prompt"},
+        {"generation_config": {"do_sample": True, "num_beams": 1, "max_new_tokens": 64}},
+        {"diff_truncated": True},
+        {"diff_tokens_used": 4097},
+        {"raw_output": "x" * 73},
+        {"subject": "wrong subject"},
+        {"raw_output": None},
+        {"generated_token_ids": []},
+        {"finish_reason": "unknown"},
+    ],
+)
+def test_inference_report_rejects_wrong_prompt_settings_and_inconsistent_results(tmp_path, change):
+    report = valid_inference_report()
+    report["examples"]["single_file"].update(change)
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(report))
+    with pytest.raises(RunError, match="pinned inference check"):
+        artifacts.validate_report(path, check="inference")
+
+
+def test_inference_report_accepts_honestly_reported_format_failures(tmp_path):
+    report = valid_inference_report()
+    report["examples"]["multiple_files"].update(
+        raw_output="x" * 73, subject=None, valid=False, errors=["too_long"]
+    )
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(report))
+    assert artifacts.validate_report(path, check="inference") == report
+
+
+@pytest.mark.parametrize(
+    "change", [{"repeat_matches": False}, {"repeat_token_ids": [0]}, {"examples": {}}]
+)
+def test_inference_report_requires_all_cases_and_repeatable_output(tmp_path, change):
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(valid_inference_report() | change))
+    with pytest.raises(RunError, match="pinned inference check"):
+        artifacts.validate_report(path, check="inference")
 
 
 def saved_run(tmp_path):
@@ -554,6 +745,41 @@ def test_report_requires_cuda_batch_and_checksum_evidence(tmp_path, change):
         artifacts.validate_report(path)
 
 
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"model_id": "another-model"},
+        {"model_revision": "main"},
+        {"model_class": "AnotherModel"},
+        {"parameter_count": 0},
+        {"cuda_parameter_count": 100},
+        {"parameter_dtype": "float32"},
+        {"tokenizer_vocab_size": 0},
+        {"tokenizer_probe_tokens": 0},
+        {"transformers_version": "0.0.0"},
+        {"load_seconds": float("nan")},
+        {"load_seconds": float("inf")},
+        {"load_seconds": -1},
+        {"cuda_memory_allocated_bytes": 0},
+        {"cuda_peak_memory_allocated_bytes": 1},
+        {"cuda_device_count": 0},
+        {"cuda_runtime_version": "12.8"},
+    ],
+)
+def test_model_report_rejects_wrong_checkpoint_cpu_weights_and_missing_evidence(tmp_path, change):
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(valid_model_report() | change))
+    with pytest.raises(RunError, match="pinned model check"):
+        artifacts.validate_report(path, check="model")
+
+
+def test_cuda_report_cannot_pass_as_a_model_load(tmp_path):
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(valid_report()))
+    with pytest.raises(RunError, match="pinned model check"):
+        artifacts.validate_report(path, check="model")
+
+
 def test_entry_point_help_works_from_another_directory(tmp_path, monkeypatch):
     for name in ("VAST_API_KEY", "VASTAI_API_KEY", "PYTHONPATH"):
         monkeypatch.delenv(name, raising=False)
@@ -641,8 +867,9 @@ def test_command_logs_survive_a_later_cleanup_session(tmp_path):
 
 def test_command_failure_retains_diagnostics(tmp_path):
     commands = command_tools.Commands(tmp_path)
-    with pytest.raises(RunError, match="failed; see"):
+    with pytest.raises(command_tools.CommandError, match="failed; see") as raised:
         commands.run([sys.executable, "-c", "print('failure details'); raise SystemExit(3)"])
+    assert raised.value.output.strip() == "failure details"
     assert "failure details" in next(tmp_path.glob("*.log")).read_text()
 
 

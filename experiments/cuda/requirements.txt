@@ -1,2 +1,3 @@
-# Dependency used by the current one-batch Parquet smoke test.
+# Dependencies stay inside the CUDA image, outside the project's uv environment.
 pyarrow==20.0.0
+transformers==5.22.2

@@ -2,12 +2,16 @@
 
 import hashlib
 import json
+import shutil
+import tempfile
 import time
 from pathlib import Path
 
 import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
+from startup import CHECKS
+from validation_data import save_predictions
 
 from . import RunError
 from .artifacts import validate_report, write_json
@@ -31,15 +35,9 @@ class Transfer:
             ),
         )
 
-    def prepare(self, bucket: str, sample: Path, run_id: str, seconds: int) -> dict:
-        data = sample.read_bytes()
-        self.client.put_object(Bucket=bucket, Key="train.parquet", Body=data)
-        return {
+    def prepare(self, bucket: str, sample: Path | None, run_id: str, seconds: int) -> dict:
+        run_config = {
             "run_id": run_id,
-            "sample_sha256": hashlib.sha256(data).hexdigest(),
-            "sample_url": self.client.generate_presigned_url(
-                "get_object", Params={"Bucket": bucket, "Key": "train.parquet"}, ExpiresIn=seconds
-            ),
             "result_url": self.client.generate_presigned_url(
                 "put_object",
                 Params={"Bucket": bucket, "Key": "result.json", "ContentType": "application/json"},
@@ -47,8 +45,18 @@ class Transfer:
             ),
             "hold_seconds": seconds,
         }
+        if sample is not None:
+            data = sample.read_bytes()
+            self.client.put_object(Bucket=bucket, Key=sample.name, Body=data)
+            run_config["sample_sha256"] = hashlib.sha256(data).hexdigest()
+            run_config["sample_url"] = self.client.generate_presigned_url(
+                "get_object", Params={"Bucket": bucket, "Key": sample.name}, ExpiresIn=seconds
+            )
+        return run_config
 
-    def collect(self, bucket: str, directory: Path, run_id: str, deadline: float) -> Path:
+    def collect(
+        self, bucket: str, directory: Path, run_id: str, deadline: float, *, check: str = "cuda"
+    ) -> Path:
         while time.monotonic() < deadline:
             try:
                 response = self.client.get_object(Bucket=bucket, Key="result.json")
@@ -58,19 +66,28 @@ class Transfer:
                 time.sleep(min(5, max(0, deadline - time.monotonic())))
                 continue
             with response["Body"] as body:
-                payload = body.read(2 * 1024 * 1024 + 1)
-            if len(payload) > 2 * 1024 * 1024:
-                raise RunError("The container returned an oversized result.")
-            result = json.loads(payload)
+                if check == "validation":
+                    # Full-split reports grow with the dataset, unlike smoke checks.
+                    with tempfile.TemporaryFile(dir=directory) as payload:
+                        shutil.copyfileobj(body, payload)
+                        payload.seek(0)
+                        result = json.load(payload)
+                else:
+                    payload = body.read(2 * 1024 * 1024 + 1)
+                    if len(payload) > 2 * 1024 * 1024:
+                        raise RunError("The container returned an oversized result.")
+                    result = json.loads(payload)
             if not isinstance(result, dict) or result.get("run_id") != run_id:
                 raise RunError("The container result does not belong to this run.")
             write_json(directory / "result.json", result)
             (directory / "smoke.log").write_text(str(result.get("log", "")), encoding="utf-8")
             if result.get("outcome") != "passed":
                 raise RunError(f"The container smoke test failed; see {directory / 'smoke.log'}")
-            report = directory / "cuda-smoke.json"
+            report = directory / CHECKS[check]["report"]
             write_json(report, result.get("report"))
-            validate_report(report)
+            validated = validate_report(report, check=check)
+            if check == "validation":
+                return save_predictions(validated, directory, run_id=run_id)
             return report
         raise RunError("The container did not return a result within the rental time limit.")
 

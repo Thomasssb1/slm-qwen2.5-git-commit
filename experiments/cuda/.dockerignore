@@ -3,3 +3,10 @@
 !requirements.txt
 !smoke_test.py
 !startup.py
+!model_load.py
+!model_spec.py
+!generation.py
+!inference_smoke.py
+!commit_subject_prompt.md
+!validation_data.py
+!validation_inference.py

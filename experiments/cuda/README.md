@@ -1,54 +1,66 @@
-# CUDA experiment container
+# CUDA experiments
 
-This is the isolated NVIDIA CUDA environment for the base-model, SFT, and DPO work. It is separate from the rest of the project so that local development never installs CUDA or training dependencies.
+Run Qwen baseline inference on Vast and evaluate the saved predictions locally. Run commands from the repository root.
 
-## One-command Vast smoke test
+## Setup
 
-Requires a funded Vast account, Terraform < 2.0, AWS credentials with S3 access,
-and `notebooks/prepared/train.parquet`. Copy `.env.example` to `.env` in the
-repository root and set `VAST_API_KEY`. The runner loads this gitignored file
-automatically; existing environment variables take precedence.
-Keep `.env` in the main checkout; `.worktreeinclude` lists it for worktree setup.
-Log Docker into GHCR using a token with `read:packages` and `write:packages`.
-Use that same token in `.env` for `VAST_IMAGE_LOGIN`: `-u USER -p TOKEN ghcr.io`, so Vast
-can pull the private image at `ghcr.io/thomasssb1/qwen-commit-cuda`.
-Run from the repository root:
+- Docker with Linux containers, Terraform >=1.6 and <2.0, a funded Vast account, and AWS credentials with S3 access.
+- Copy [`.env.example`](../../.env.example) to `.env` in the main checkout. Set `VAST_API_KEY` and `VAST_IMAGE_LOGIN`.
+- Log Docker into GHCR with `docker login ghcr.io`. Use the same token in `VAST_IMAGE_LOGIN`, with `read:packages` and `write:packages` access.
+
+## Run a check
 
 ```console
-uv run python experiments/cuda/run.py
+uv run python experiments/cuda/run.py --check model
 ```
 
-Builds and pushes the image, creates a temporary private S3 bucket, and launches
-the image directly on Vast. The container tests one training row using expiring
-transfer URLs. The runner saves `cuda-smoke.json` and `smoke.log`, then destroys
-the rental and bucket, including its objects. The registry image is retained.
-The bucket is unversioned; leftover objects expire after seven days.
-Artifacts and recovery state stay under `experiments/cuda/artifacts/vast/`.
+| `--check` | Purpose | Required data |
+| --- | --- | --- |
+| `cuda` (default) | Test GPU access with one training row | `notebooks/prepared/train.parquet` |
+| `model` | Load the pinned Qwen model in BF16 | None |
+| `inference` | Generate from synthetic diffs and check repeatability | None |
+| `validation` | Generate predictions for the full validation split | See below |
 
-Defaults to the cheapest matching RTX 3090 or RTX PRO 4000, up to $0.50/hour
-including storage, with a 60-minute execution timeout.
+The runner builds and pushes the image, rents a GPU, collects results, then removes the rental and temporary S3 bucket. The registry image is retained. Reports and logs are saved under the gitignored `experiments/cuda/artifacts/vast/RUN_ID/` directory.
 
-- `--gpu NAME`: replace the default GPU allowlist; repeat for multiple models.
-- `--max-hourly-price USD`: set the maximum hourly price, including storage.
-- `--timeout-minutes N`: set the rental execution timeout.
-- `--dataset PATH`: use a different training Parquet file.
-- `--image-repository REPO`: change the registry repository; also accepts `VAST_IMAGE_REPOSITORY`.
-- `--aws-region REGION`: choose the bucket region; defaults to the AWS configuration or `eu-west-2`.
+Defaults: RTX 3090 or RTX PRO 4000, at most **$0.50/hour** including storage, and a **60-minute** execution timeout. Override these with `--gpu`, `--max-hourly-price`, and `--timeout-minutes`. See `uv run python experiments/cuda/run.py --help` for all options.
 
-Keep the run directory until cleanup succeeds. Retry failed teardown with:
+Model revisions and dependencies are pinned in [model_spec.py](model_spec.py) and [requirements.txt](requirements.txt).
+
+## Run the validation split
 
 ```console
-uv run python experiments/cuda/run.py --cleanup PATH_TO_RUN_DIRECTORY
+uv run python experiments/cuda/run.py --check validation --reviewed-validation notebooks/prepared/reviewed_validation.parquet
 ```
 
-If provisioning was interrupted, check Vast and S3 for leftovers named
-`qwen-cuda-...` from the run. Keep the runner open until teardown finishes.
+Reads `notebooks/prepared/validation.parquet`; use `--dataset PATH` to override it. The optional reviewed file marks approved references without filtering the full split. Only IDs and diffs are uploaded; reference subjects stay local. The test split is not read.
 
-## Rental-GPU smoke test
+Generation uses the [commit-subject prompt](commit_subject_prompt.md), greedy decoding, the first 4,096 diff tokens, and up to 64 output tokens. Subjects must pass the one-line, 72-character format check; invalid outputs are retained without repair.
 
-Run this only on a machine with a compatible NVIDIA driver, Docker Engine, and NVIDIA Container Toolkit. The smoke test does not download Qwen or perform model inference. It reads one batch from `train.parquet`, verifies the requested GPU is usable with a CUDA tensor operation, prints diagnostics, and writes `cuda-smoke.json` to the artifact directory.
+Results include `validation-predictions.parquet` with joined predictions, diffs, and references, plus `validation.json` with raw results and generation settings. Keep the run directory intact for evaluation.
 
-In PowerShell, from the repository root:
+## Evaluate the baseline
+
+```console
+uv run python experiments/cuda/evaluate.py experiments/cuda/artifacts/vast/RUN_ID
+```
+
+Writes `evaluation.json` with formatting results and generation-only latency. Timing excludes tokenization, model loading, provisioning, and transfer. Formatting does not measure correctness.
+
+## Recover interrupted runs
+
+Keep the run directory until cleanup succeeds. Retry teardown with:
+
+```console
+uv run python experiments/cuda/run.py --cleanup experiments/cuda/artifacts/vast/RUN_ID
+```
+
+Check `run.json` for cleanup status. If provisioning was interrupted, also check Vast and S3 for resources named `qwen-cuda-...` from that run. The runner retries transient polling failures automatically.
+
+<details>
+<summary>Run the CUDA smoke test directly on an NVIDIA machine</summary>
+
+Requires Docker, a compatible NVIDIA driver, NVIDIA Container Toolkit, and `notebooks/prepared/train.parquet`. In PowerShell:
 
 ```powershell
 $env:QWEN_COMMIT_DATASET_DIR = (Resolve-Path notebooks/prepared).Path
@@ -59,4 +71,6 @@ docker compose --file experiments/cuda/compose.yaml build
 docker compose --file experiments/cuda/compose.yaml run --rm cuda-experiment
 ```
 
-`QWEN_COMMIT_ARTIFACT_DIR` must be a private, writable directory. Do not commit it or the generated smoke report. A CUDA-unavailable result is a failure, rather than a CPU fallback: the point of this check is to validate the rental GPU before later work consumes it.
+This checks CUDA and writes `cuda-smoke.json`; it does not load Qwen.
+
+</details>

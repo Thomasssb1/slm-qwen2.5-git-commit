@@ -28,14 +28,14 @@ resource "vastai_instance" "smoke" {
   image_login    = var.image_login
   vm             = false
   runtype        = "args"
-  args           = ["/opt/qwen-commit/startup.py", jsonencode(var.job)]
+  args           = ["/opt/qwen-commit/startup.py", jsonencode(var.run_config)]
   cancel_unavail = true
   disk           = 80
 
   lifecycle {
     precondition {
-      condition     = var.job != null
-      error_message = "Upload the sample and provide the transfer job before launching."
+      condition     = var.run_config != null
+      error_message = "Provide the container run configuration before launching."
     }
   }
 

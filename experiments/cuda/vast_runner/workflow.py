@@ -9,12 +9,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from startup import CHECKS
+from validation_data import INPUT_FILENAME, prepare_validation
+
 from . import RunError
 from .artifacts import RUNS_DIRECTORY, training_sample, write_json
 from .commands import Commands
 from .image import publish
 from .storage import Transfer
-from .terraform import cleanup, terraform
+from .terraform import apply_or_destroy, cleanup, terraform
 
 
 def run_smoke(
@@ -25,10 +28,14 @@ def run_smoke(
     timeout_minutes: float,
     image_repository: str = "ghcr.io/thomasssb1/qwen-commit-cuda",
     aws_region: str | None = None,
+    check: str = "cuda",
+    reviewed_validation: Path | None = None,
     runs_directory: Path = RUNS_DIRECTORY,
     commands_type=Commands,
     transfer_type=Transfer,
 ) -> Path:
+    if check not in CHECKS:
+        raise ValueError("Choose the cuda, model, inference, or validation check.")
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:12]
     directory = (runs_directory / run_id).resolve()
     directory.mkdir(parents=True, mode=0o700)
@@ -39,11 +46,19 @@ def run_smoke(
         "label": "qwen-cuda-" + run_id,
         "outcome": "preparing",
         "cleanup": "not-needed",
+        "check": check,
     }
     write_json(directory / "run.json", state)
     print(f"Run artifacts: {directory}", flush=True)
 
-    training_sample(dataset, directory / "train.parquet")
+    sample = None
+    if check == "cuda":
+        sample = directory / "train.parquet"
+        training_sample(dataset, sample)
+    elif check == "validation":
+        state["dataset"] = prepare_validation(dataset, directory, reviewed_validation)
+        sample = directory / INPUT_FILENAME
+        write_json(directory / "run.json", state)
     transfer = transfer_type(aws_region)
     commands.run(["terraform", "version"])
     commands.run(["docker", "info"])
@@ -71,12 +86,9 @@ def run_smoke(
         # Reset before each apply: a lost creation response can leave untracked resources.
         state["apply_complete"] = False
         write_json(directory / "run.json", state)
-        terraform(
+        apply_or_destroy(
             commands,
             "apply",
-            "-auto-approve",
-            "-input=false",
-            "-no-color",
             timeout=deadline - time.monotonic(),
         )
         state["apply_complete"] = True
@@ -90,9 +102,10 @@ def run_smoke(
         ).stdout.strip()
         state["bucket"] = bucket
         write_json(directory / "run.json", state)
-        variables["job"] = transfer.prepare(
-            bucket, directory / "train.parquet", run_id, math.ceil(timeout_minutes * 60) + 300
+        variables["run_config"] = transfer.prepare(
+            bucket, sample, run_id, math.ceil(timeout_minutes * 60) + 300
         )
+        variables["run_config"]["check"] = check
         variables["launch"] = True
         write_json(infrastructure / "run.auto.tfvars.json", variables)
         print(
@@ -117,8 +130,8 @@ def run_smoke(
             or not 0 <= price <= max_hourly_price
         ):
             raise RunError("The provisioned instance exceeds the requested hourly price limit.")
-        print("Waiting for the container's smoke-test result...", flush=True)
-        report = transfer.collect(bucket, directory, run_id, deadline)
+        print(f"Waiting for the container's {check} result...", flush=True)
+        report = transfer.collect(bucket, directory, run_id, deadline, check=check)
         state["outcome"] = "passed"
     except BaseException:
         state["outcome"] = "failed"

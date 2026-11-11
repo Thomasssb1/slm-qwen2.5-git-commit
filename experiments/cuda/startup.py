@@ -10,30 +10,59 @@ import time
 import urllib.request
 from pathlib import Path
 
+CHECKS = {
+    "cuda": {
+        "script": "smoke_test.py",
+        "report": "cuda-smoke.json",
+        "timeout": 300,
+        "dataset": "train.parquet",
+    },
+    "model": {"script": "model_load.py", "report": "model-load.json", "timeout": 1800},
+    "inference": {
+        "script": "inference_smoke.py",
+        "report": "inference-smoke.json",
+        "timeout": 1800,
+    },
+    "validation": {
+        "script": "validation_inference.py",
+        "report": "validation.json",
+        "timeout": 1800,
+        "dataset": "validation.parquet",
+    },
+}
+
 
 def execute(
-    job: dict,
+    run_config: dict,
     *,
-    sample: Path = Path("/datasets/train.parquet"),
-    report: Path = Path("/artifacts/cuda-smoke.json"),
+    sample: Path | None = None,
+    report: Path | None = None,
     command: list[str] | None = None,
 ) -> dict:
-    result = {"run_id": job["run_id"], "outcome": "failed", "log": ""}
+    result = {"run_id": run_config["run_id"], "outcome": "failed", "log": ""}
     try:
-        with urllib.request.urlopen(job["sample_url"], timeout=60) as response:
-            data = response.read()
-        if hashlib.sha256(data).hexdigest() != job["sample_sha256"]:
-            raise ValueError("Sample checksum mismatch")
-        sample.write_bytes(data)
+        check = run_config.get("check", "cuda")
+        if check not in CHECKS:
+            raise ValueError("Unknown check")
+        settings = CHECKS[check]
+        if "dataset" in settings:
+            sample = sample if sample is not None else Path("/datasets") / settings["dataset"]
+            with urllib.request.urlopen(run_config["sample_url"], timeout=60) as response:
+                data = response.read()
+            if hashlib.sha256(data).hexdigest() != run_config["sample_sha256"]:
+                raise ValueError("Sample checksum mismatch")
+            sample.write_bytes(data)
+        if report is None:
+            report = Path("/artifacts") / settings["report"]
         report.unlink(missing_ok=True)
         process = subprocess.run(
-            command or [sys.executable, "/opt/qwen-commit/smoke_test.py"],
+            command or [sys.executable, f"/opt/qwen-commit/{settings['script']}"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=300,
+            timeout=settings["timeout"],
             check=False,
         )
         result["log"] = process.stdout[-65536:]
@@ -42,15 +71,15 @@ def execute(
             result["outcome"] = "passed"
     except Exception as error:
         # Exceptions from HTTP clients can include the signed URL; never print it.
-        result["log"] += f"\nSmoke job failed: {type(error).__name__}"
+        result["log"] += f"\nContainer run failed: {type(error).__name__}"
     return result
 
 
-def main(job: dict) -> int:
-    deadline = time.monotonic() + job["hold_seconds"]
-    result = execute(job)
+def main(run_config: dict) -> int:
+    deadline = time.monotonic() + run_config["hold_seconds"]
+    result = execute(run_config)
     request = urllib.request.Request(
-        job["result_url"],
+        run_config["result_url"],
         data=json.dumps(result).encode(),
         headers={"Content-Type": "application/json"},
         method="PUT",
