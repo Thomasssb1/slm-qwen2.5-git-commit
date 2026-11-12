@@ -47,6 +47,19 @@ uv run python experiments/cuda/evaluate.py experiments/cuda/artifacts/vast/RUN_I
 
 Writes `evaluation.json` with formatting results and generation-only latency. Timing excludes tokenization, model loading, provisioning, and transfer. Formatting does not measure correctness.
 
+## Judge correctness locally
+
+Open [judge_predictions.ipynb](../../notebooks/judge_predictions.ipynb) in the **Qwen Commit Review (ROCm)** kernel.
+
+The pinned Qwen3-4B judge assesses every approved validation example. Oversized prompts and invalid responses are deferred for manual review. To review saved proposals without loading the GPU, run the setup blocks through **Calculate correctness and usable output**, then jump to **Review each verdict**.
+
+`correctness-summary.json` keeps model and human scores separate:
+
+- **Correctness:** accurate subjects divided by all approved validation examples.
+- **Usable output:** subjects that are both accurate and format-valid, using the same denominator.
+
+Human review is required to establish the correctness baseline.
+
 ## Recover interrupted runs
 
 Keep the run directory until cleanup succeeds. Retry teardown with:

@@ -56,6 +56,12 @@ Create a dedicated virtual environment and install the PyTorch CUDA wheel that m
 
 The GPU kernel and its model cache are review-only local tooling; neither is part of this package or lockfile.
 
+## Judge validation predictions
+
+After a [Vast validation run](experiments/cuda/README.md#run-the-validation-split), open `notebooks/judge_predictions.ipynb` in the existing **Qwen Commit Review (ROCm)** kernel. Select the saved run directory to judge every approved validation reference with a pinned local [Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507) model, then review its proposals against the diffs.
+
+See [local correctness evaluation](experiments/cuda/README.md#judge-correctness-locally) for usage and scoring details.
+
 ## Output contract
 
 The model must return exactly one Git commit subject:
